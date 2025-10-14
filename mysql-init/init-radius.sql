@@ -1,14 +1,15 @@
 CREATE DATABASE IF NOT EXISTS radius;
 USE radius;
 
+
 -- Clients table
 CREATE TABLE IF NOT EXISTS clients (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nombre VARCHAR(64) NOT NULL,
     apellido VARCHAR(64) NOT NULL,
     cedula VARCHAR(10) NOT NULL,
-    telefono VARCHAR(10),
-    email VARCHAR(64),
+    telefono VARCHAR(10) NOT NULL,
+    email VARCHAR(64) NOT NULL,
     username VARCHAR(64) UNIQUE,
     approved TINYINT(1) DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
