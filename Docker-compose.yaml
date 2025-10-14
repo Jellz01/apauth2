@@ -39,13 +39,13 @@ services:
       - dalonet
 
   php:
-    build: ./Web
+    build: ./web
     container_name: php_web
     restart: always
     ports:
       - "8080:80"
     volumes:
-      - ./Web:/var/www/html
+      - ./web:/var/www/html
     environment:
       MYSQL_HOST: mysql
       MYSQL_USER: radius

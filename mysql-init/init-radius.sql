@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS clients (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nombre VARCHAR(64) NOT NULL,
     apellido VARCHAR(64) NOT NULL,
-    cedula VARCHAR(10) NOT NULL UNIQUE,
+    cedula VARCHAR(10) NOT NULL,
     telefono VARCHAR(10),
     email VARCHAR(64),
     username VARCHAR(64) UNIQUE,
