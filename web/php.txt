@@ -1,0 +1,34 @@
+    <?php
+
+        $host = ' mysql_server'
+        $db = 'radius';
+        $user = 'radius'
+        $pass = 'dalodbpass'
+
+
+        $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+        $options = [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ];
+
+        try {
+            $conn = new PDO($dsn, $user, $pass, $options);
+        } catch (\PDOException $e) {
+            die("DB Connection failed: " . $e->getMessage());
+        }
+
+        f ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $nombre = $_POST['nombre'];
+            $apellido = $_POST['apellido'];
+            $cedula = $_POST['cedula'];
+            $telefono = $_POST['telefono'];
+            $correo = $_POST['correo'];
+
+            // Insert into clients table, approved=0 by default
+            $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, username, approved) VALUES (?, ?, ?, ?, ?, ?, 0)");
+            $stmt->execute([$nombre, $apellido, $cedula, $telefono, $correo, $cedula]);
+
+            echo "Registro enviado correctamente. Espere aprobación del administrador.";
+        }
+    ?>

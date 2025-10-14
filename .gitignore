@@ -1,0 +1,5 @@
+# Ignore MySQL socket and other runtime files
+radius-mysql/*.sock
+radius-mysql/ib_buffer_pool
+radius-mysql/binlog.index
+radius-mysql/auto.cnf
