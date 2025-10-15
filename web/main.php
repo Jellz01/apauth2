@@ -1,16 +1,41 @@
 <?php
 $host = 'mysql_server';
-$db = 'radius';
+$db   = 'radius';
 $user = 'radius';
 $pass = 'dalodbpass';
 
 $conn = mysqli_connect($host, $user, $pass, $db);
 
 if (!$conn) {
-    header("Location: principal.html?status=error&message=Error%20de%20conexi%C3%B3n%20a%20la%20base%20de%20datos.");
+    die("Error de conexión a la base de datos.");
+}
+
+// Get MAC from the AP/captive portal header
+$mac = strtoupper(trim($_SERVER['HTTP_X_CLIENT_MAC'] ?? ''));
+
+if (!$mac || !preg_match('/^([0-9A-F]{2}[:-]){5}([0-9A-F]{2})$/', $mac)) {
+    die("MAC inválida.");
+}
+
+// Check if client already exists by MAC
+$stmtCheck = $conn->prepare("SELECT * FROM clients WHERE mac_address = ?");
+$stmtCheck->bind_param("s", $mac);
+$stmtCheck->execute();
+$result = $stmtCheck->get_result();
+
+if ($result->num_rows > 0) {
+    // MAC is already registered → skip form, allow login
+    $client = $result->fetch_assoc();
+
+    if ($client['approved'] == 1) {
+        echo "Usuario ya registrado y aprobado. Puede autenticarse con RADIUS.";
+    } else {
+        echo "Usuario registrado pero aún no aprobado por el administrador.";
+    }
     exit();
 }
 
+// MAC not registered → must fill form
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $nombre   = trim($_POST['nombre']);
     $apellido = trim($_POST['apellido']);
@@ -18,23 +43,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $telefono = trim($_POST['telefono']);
     $correo   = trim($_POST['correo']);
 
-    // 1️⃣ Insert into clients
-    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, username, approved)
-                            VALUES (?, ?, ?, ?, ?, ?, 0)");
-    $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $cedula);
-
-    if ($stmt->execute()) {
-        // 2️⃣ Add RADIUS user (username = cedula, password = cedula)
-        $stmt2 = $conn->prepare("INSERT INTO radcheck (username, attribute, op, value)
-                                 VALUES (?, 'Cleartext-Password', ':=', ?)");
-        $stmt2->bind_param("ss", $cedula, $cedula);
-        $stmt2->execute();
-
-        header("Location: bienvenido.html?status=success&message=Registro%20enviado%20correctamente.%20Espere%20aprobaci%C3%B3n%20del%20administrador.");
-    } else {
-        header("Location: principal.html?status=error&message=Error%20al%20registrar%20el%20cliente.");
+    // Validate all required fields
+    if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
+        header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios.");
+        exit();
     }
 
+    // Insert client record
+    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac_address, approved)
+                            VALUES (?, ?, ?, ?, ?, ?, 0)");
+    $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac);
+
+    if ($stmt->execute()) {
+        $client_id = $conn->insert_id;
+
+        // Insert RADIUS entry linked to client_id
+        $stmt2 = $conn->prepare("INSERT INTO radcheck (client_id, username, attribute, op, value)
+                                 VALUES (?, ?, 'Cleartext-Password', ':=', ?)");
+        $stmt2->bind_param("iss", $client_id, $mac, $mac);
+        $stmt2->execute();
+
+        header("Location: bienvenido.html?status=success&message=Registro%20enviado%20correctamente.%20Espere%20aprobación%20del%20administrador.");
+        exit();
+    } else {
+        header("Location: principal.html?status=error&message=Error%20al%20registrar%20el%20cliente.");
+        exit();
+    }
+} else {
+    // No POST → show form
+    header("Location: principal.html?status=info&message=Por%20favor%20complete%20el%20formulario%20para%20registrarse.");
     exit();
 }
 ?>

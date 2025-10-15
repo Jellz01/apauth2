@@ -3,25 +3,29 @@ USE radius;
 
 
 -- Clients table
-CREATE TABLE IF NOT EXISTS clients (
+CREATE TABLE clients (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    nombre VARCHAR(64) NOT NULL,
-    apellido VARCHAR(64) NOT NULL,
-    cedula VARCHAR(10) NOT NULL,
-    telefono VARCHAR(10) NOT NULL,
-    email VARCHAR(64) NOT NULL,
-    username VARCHAR(64) UNIQUE,
-    approved TINYINT(1) DEFAULT 1
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    nombre VARCHAR(100) NOT NULL,
+    apellido VARCHAR(100) NOT NULL,
+    cedula VARCHAR(20) NOT NULL,
+    telefono VARCHAR(20) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    mac_address VARCHAR(17) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
 
 -- FreeRADIUS authentication table
-CREATE TABLE IF NOT EXISTS radcheck (
+CREATE TABLE radcheck (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(64) NOT NULL,
-    attribute VARCHAR(64) NOT NULL,
-    op CHAR(2) NOT NULL DEFAULT ':=',
-    value VARCHAR(253) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    client_id INT NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    attribute VARCHAR(64) NOT NULL DEFAULT 'Cleartext-Password',
+    op VARCHAR(2) NOT NULL DEFAULT ':=',
+    value VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_username (username)
+) ENGINE=InnoDB;
 
 -- FreeRADIUS accounting table
 CREATE TABLE IF NOT EXISTS radacct (
