@@ -10,32 +10,36 @@ if (!$conn) {
     die("Error de conexión a la base de datos.");
 }
 
-// Get MAC from the AP/captive portal header
+// Get MAC from AP/captive portal header (replace with your AP header)
 $mac = strtoupper(trim($_SERVER['HTTP_X_CLIENT_MAC'] ?? ''));
+
+// For testing: uncomment to hardcode a MAC
+// $mac = 'AA:BB:CC:DD:EE:FF';
 
 if (!$mac || !preg_match('/^([0-9A-F]{2}[:-]){5}([0-9A-F]{2})$/', $mac)) {
     die("MAC inválida.");
 }
 
-// Check if client already exists by MAC
+// Check if the MAC is already registered
 $stmtCheck = $conn->prepare("SELECT * FROM clients WHERE mac_address = ?");
 $stmtCheck->bind_param("s", $mac);
 $stmtCheck->execute();
 $result = $stmtCheck->get_result();
 
 if ($result->num_rows > 0) {
-    // MAC is already registered → skip form, allow login
     $client = $result->fetch_assoc();
 
     if ($client['approved'] == 1) {
+        // Already registered and approved → allow login
         echo "Usuario ya registrado y aprobado. Puede autenticarse con RADIUS.";
     } else {
+        // Registered but not approved yet
         echo "Usuario registrado pero aún no aprobado por el administrador.";
     }
     exit();
 }
 
-// MAC not registered → must fill form
+// MAC not registered → show and process form
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $nombre   = trim($_POST['nombre']);
     $apellido = trim($_POST['apellido']);
@@ -43,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $telefono = trim($_POST['telefono']);
     $correo   = trim($_POST['correo']);
 
-    // Validate all required fields
+    // Validate required fields
     if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
         header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios.");
         exit();
@@ -51,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Insert client record
     $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac_address, approved)
-                            VALUES (?, ?, ?, ?, ?, ?, 0)");
+                            VALUES (?, ?, ?, ?, ?, ?, 1)"); // approved=1 for immediate connection
     $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac);
 
     if ($stmt->execute()) {
@@ -63,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt2->bind_param("iss", $client_id, $mac, $mac);
         $stmt2->execute();
 
-        header("Location: bienvenido.html?status=success&message=Registro%20enviado%20correctamente.%20Espere%20aprobación%20del%20administrador.");
+        header("Location: bienvenido.html?status=success&message=Registro%20completado.%20Ahora%20puede%20conectarse.");
         exit();
     } else {
         header("Location: principal.html?status=error&message=Error%20al%20registrar%20el%20cliente.");
