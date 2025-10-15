@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    // Check if already registered
+    // Check if already registered by cedula or email
     $stmtCheck = $conn->prepare("SELECT * FROM clients WHERE cedula = ? OR email = ?");
     $stmtCheck->bind_param("ss", $cedula, $correo);
     $stmtCheck->execute();
@@ -35,17 +35,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    // Insert client record (no MAC)
-    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, approved)
-                            VALUES (?, ?, ?, ?, ?, 1)");
+    // Insert client record
+    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email) VALUES (?, ?, ?, ?, ?)");
     $stmt->bind_param("sssss", $nombre, $apellido, $cedula, $telefono, $correo);
 
     if ($stmt->execute()) {
         $client_id = $conn->insert_id;
 
-        // Insert RADIUS entry (username/password = cedula)
-        $stmt2 = $conn->prepare("INSERT INTO radcheck (client_id, username, attribute, op, value)
-                                 VALUES (?, ?, 'Cleartext-Password', ':=', ?)");
+        // Insert FreeRADIUS credentials (username/password = cedula)
+        $stmt2 = $conn->prepare("INSERT INTO radcheck (client_id, username, value) VALUES (?, ?, ?)");
         $password = $cedula;
         $stmt2->bind_param("iss", $client_id, $cedula, $password);
         $stmt2->execute();
@@ -56,9 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header("Location: principal.html?status=error&message=Error%20al%20registrar%20el%20cliente.");
         exit();
     }
-
 } else {
-    // GET → redirect to form
+    // GET request → redirect to form
     header("Location: principal.html");
     exit();
 }
