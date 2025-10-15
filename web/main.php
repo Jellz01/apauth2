@@ -30,19 +30,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $result = $stmtCheck->get_result();
     
     if ($result->num_rows > 0) {
-        $client = $result->fetch_assoc();
-        if ($client['approved'] == 1) {
-            header("Location: bienvenido.html?status=success&message=Ya%20está%20registrado.");
-            exit();
-        } else {
-            echo "Usuario registrado pero aún no aprobado por el administrador.";
-            exit();
-        }
+        header("Location: bienvenido.html?status=success&message=Ya%20está%20registrado.");
+        exit();
     }
     
-    // Insert client record (without MAC)
-    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, approved)
-                            VALUES (?, ?, ?, ?, ?, 1)");
+    // Insert client record (without MAC and approved column)
+    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email)
+                            VALUES (?, ?, ?, ?, ?)");
     $stmt->bind_param("sssss", $nombre, $apellido, $cedula, $telefono, $correo);
     
     if ($stmt->execute()) {
