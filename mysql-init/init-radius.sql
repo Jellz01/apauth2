@@ -2,6 +2,12 @@ CREATE DATABASE IF NOT EXISTS radius;
 USE radius;
 
 
+
+CREATE USER 'radius'@'%' IDENTIFIED BY 'dalodbpass';
+GRANT ALL PRIVILEGES ON radius.* TO 'radius'@'%';
+FLUSH PRIVILEGES;
+
+
 -- Clients table
 CREATE TABLE clients (
     id INT AUTO_INCREMENT PRIMARY KEY,
