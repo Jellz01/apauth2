@@ -4,9 +4,19 @@ $db   = 'radius';
 $user = 'radius';
 $pass = 'dalodbpass';
 
+// Path to log file inside PHP container
+$logFile = '/tmp/registration_errors.log';
+
+// Helper function to log errors
+function log_error($message) {
+    global $logFile;
+    file_put_contents($logFile, date("Y-m-d H:i:s") . " - " . $message . "\n", FILE_APPEND);
+}
+
 // Connect to database
 $conn = mysqli_connect($host, $user, $pass, $db);
 if (!$conn) {
+    log_error("Database connection failed: " . mysqli_connect_error());
     die("Error de conexión a la base de datos.");
 }
 
@@ -24,35 +34,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    // Check if already registered by cedula or email
-    $stmtCheck = $conn->prepare("SELECT * FROM clients WHERE cedula = ? OR email = ?");
-    $stmtCheck->bind_param("ss", $cedula, $correo);
-    $stmtCheck->execute();
-    $result = $stmtCheck->get_result();
-
-    if ($result->num_rows > 0) {
-        header("Location: bienvenido.html?status=success&message=Ya%20está%20registrado.");
-        exit();
-    }
+    
 
     // Insert client record
     $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email) VALUES (?, ?, ?, ?, ?)");
+    if (!$stmt) {
+        log_error("Prepare failed (insert client): " . $conn->error);
+        die("Error preparando la inserción del cliente.");
+    }
     $stmt->bind_param("sssss", $nombre, $apellido, $cedula, $telefono, $correo);
 
     if ($stmt->execute()) {
         $client_id = $conn->insert_id;
 
-        // Insert FreeRADIUS credentials (username/password = cedula)
-        $stmt2 = $conn->prepare("INSERT INTO radcheck (client_id, username, value) VALUES (?, ?, ?)");
-        $password = $cedula;
+        // Insert FreeRADIUS credentials with client_id
+        $stmt2 = $conn->prepare("INSERT INTO radcheck (client_id, username, attribute, op, value) VALUES (?, ?, 'Cleartext-Password', ':=', ?)");
+        if (!$stmt2) {
+            log_error("Prepare failed (radcheck): " . $conn->error);
+            die("Error preparando la inserción en FreeRADIUS.");
+        }
+        $password = $cedula; // Using cedula as password
         $stmt2->bind_param("iss", $client_id, $cedula, $password);
-        $stmt2->execute();
+
+        if (!$stmt2->execute()) {
+            log_error("Execute failed (radcheck): " . $stmt2->error);
+            die("Error al insertar en FreeRADIUS.");
+        }
 
         header("Location: bienvenido.html?status=success&message=Registro%20completado.%20Usuario:%20$cedula");
         exit();
     } else {
-        header("Location: principal.html?status=error&message=Error%20al%20registrar%20el%20cliente.");
-        exit();
+        log_error("Execute failed (insert client): " . $stmt->error);
+        die("Error al registrar el cliente: " . $stmt->error);
     }
 } else {
     // GET request → redirect to form
