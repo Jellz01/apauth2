@@ -9,53 +9,7 @@ if (!$conn) {
     die("Error de conexión a la base de datos.");
 }
 
-// 1️⃣ Get MAC from multiple sources
-function getMacAddress() {
-    $sources = [
-        $_GET['mac'] ?? '',
-        $_POST['mac'] ?? '',
-        $_SERVER['HTTP_X_CLIENT_MAC'] ?? '',
-        $_SERVER['HTTP_CLIENT_MAC'] ?? '',
-        $_SERVER['REMOTE_ADDR'] ?? ''
-    ];
-    
-    foreach ($sources as $mac) {
-        $mac = strtoupper(trim($mac));
-        // Remove any separators
-        $mac = preg_replace('/[^0-9A-F]/', '', $mac);
-        if (strlen($mac) === 12) {
-            // Convert to XX:XX:XX:XX:XX:XX format
-            return implode(':', str_split($mac, 2));
-        }
-    }
-    
-    return null;
-}
-
-$mac = getMacAddress();
-
-// 2️⃣ Validate MAC format
-if (!$mac || !preg_match('/^([0-9A-F]{2}:){5}([0-9A-F]{2})$/', $mac)) {
-    die("MAC inválida o no detectada. MAC recibida: " . htmlspecialchars($mac ?: 'ninguna'));
-}
-
-// 3️⃣ Check if MAC is already registered
-$stmtCheck = $conn->prepare("SELECT * FROM clients WHERE mac_address = ?");
-$stmtCheck->bind_param("s", $mac);
-$stmtCheck->execute();
-$result = $stmtCheck->get_result();
-
-if ($result->num_rows > 0) {
-    $client = $result->fetch_assoc();
-    if ($client['approved'] == 1) {
-        echo "Usuario ya registrado y aprobado. Puede autenticarse con RADIUS.";
-    } else {
-        echo "Usuario registrado pero aún no aprobado por el administrador.";
-    }
-    exit();
-}
-
-// 4️⃣ Process form submission for new MAC
+// Process form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $nombre   = trim($_POST['nombre']);
     $apellido = trim($_POST['apellido']);
@@ -65,33 +19,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Validate all required fields
     if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
-        header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios.&mac=$mac");
+        header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios.");
         exit();
     }
     
-    // Insert client record
-    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac_address, approved)
-                            VALUES (?, ?, ?, ?, ?, ?, 1)"); // approved=1 for immediate access
-    $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac);
+    // Check if already registered by cedula or email
+    $stmtCheck = $conn->prepare("SELECT * FROM clients WHERE cedula = ? OR email = ?");
+    $stmtCheck->bind_param("ss", $cedula, $correo);
+    $stmtCheck->execute();
+    $result = $stmtCheck->get_result();
+    
+    if ($result->num_rows > 0) {
+        $client = $result->fetch_assoc();
+        if ($client['approved'] == 1) {
+            header("Location: bienvenido.html?status=success&message=Ya%20está%20registrado.");
+            exit();
+        } else {
+            echo "Usuario registrado pero aún no aprobado por el administrador.";
+            exit();
+        }
+    }
+    
+    // Insert client record (without MAC)
+    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, approved)
+                            VALUES (?, ?, ?, ?, ?, 1)");
+    $stmt->bind_param("sssss", $nombre, $apellido, $cedula, $telefono, $correo);
     
     if ($stmt->execute()) {
         $client_id = $conn->insert_id;
         
-        // Insert RADIUS entry
+        // Insert RADIUS entry using cedula as username
         $stmt2 = $conn->prepare("INSERT INTO radcheck (client_id, username, attribute, op, value)
                                  VALUES (?, ?, 'Cleartext-Password', ':=', ?)");
-        $stmt2->bind_param("iss", $client_id, $mac, $mac);
+        $password = $cedula; // or generate a password
+        $stmt2->bind_param("iss", $client_id, $cedula, $password);
         $stmt2->execute();
         
-        header("Location: bienvenido.html?status=success&message=Registro%20completado.%20Ahora%20puede%20conectarse.");
+        header("Location: bienvenido.html?status=success&message=Registro%20completado.%20Usuario:%20$cedula");
         exit();
     } else {
-        header("Location: principal.html?status=error&message=Error%20al%20registrar%20el%20cliente.&mac=$mac");
+        header("Location: principal.html?status=error&message=Error%20al%20registrar%20el%20cliente.");
         exit();
     }
 } else {
-    // No POST → redirect to the registration form with MAC
-    header("Location: principal.html?status=info&message=Por%20favor%20complete%20el%20formulario%20para%20registrarse.&mac=$mac");
+    // GET request - redirect to form
+    header("Location: principal.html");
     exit();
 }
 ?>
