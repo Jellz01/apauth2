@@ -2,8 +2,6 @@ CREATE DATABASE IF NOT EXISTS radius;
 USE radius;
 
 
-
-
 -- Clients table
 CREATE TABLE clients (
     id INT AUTO_INCREMENT PRIMARY KEY,
