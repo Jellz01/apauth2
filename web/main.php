@@ -12,16 +12,12 @@ if (!$conn) {
 // 1️⃣ Get MAC from query parameter or AP header
 $mac = strtoupper(trim($_GET['mac'] ?? $_SERVER['HTTP_X_CLIENT_MAC'] ?? ''));
 
-// 2️⃣ Debug: log MAC for troubleshooting
-file_put_contents('mac_debug.log', date('Y-m-d H:i:s') . " MAC received: '$mac'\n", FILE_APPEND);
-
-// 3️⃣ Validate MAC format
+// 2️⃣ Validate MAC format
 if (!$mac || !preg_match('/^([0-9A-F]{2}[:-]){5}([0-9A-F]{2})$/', $mac)) {
-    file_put_contents('mac_debug.log', date('Y-m-d H:i:s') . " Invalid MAC\n", FILE_APPEND);
-    die("MAC inválida. Verifique mac_debug.log para detalles.");
+    die("MAC inválida.");
 }
 
-// 4️⃣ Check if MAC is already registered
+// 3️⃣ Check if MAC is already registered
 $stmtCheck = $conn->prepare("SELECT * FROM clients WHERE mac_address = ?");
 $stmtCheck->bind_param("s", $mac);
 $stmtCheck->execute();
@@ -37,7 +33,7 @@ if ($result->num_rows > 0) {
     exit();
 }
 
-// 5️⃣ Process form submission for new MAC
+// 4️⃣ Process form submission for new MAC
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $nombre   = trim($_POST['nombre']);
     $apellido = trim($_POST['apellido']);
