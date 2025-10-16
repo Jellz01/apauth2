@@ -5,10 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Registro - WiFi Público</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
+        * { box-sizing: border-box; }
         body {
             font-family: Arial, sans-serif;
             background: #f4f4f4;
@@ -20,13 +17,11 @@
             margin: 0;
             padding: 10px;
         }
-
         .top-image, .bottom-image {
             width: 100%;
             max-width: 400px;
             border-radius: 10px;
         }
-
         .form-container {
             background: white;
             padding: 25px 20px;
@@ -36,14 +31,12 @@
             max-width: 400px;
             margin: 15px 0;
         }
-
         h2 {
             color: #333;
             text-align: center;
             margin-bottom: 20px;
             font-size: 1.4rem;
         }
-
         input {
             width: 100%;
             padding: 12px;
@@ -52,7 +45,6 @@
             border-radius: 8px;
             font-size: 1rem;
         }
-
         button {
             width: 100%;
             padding: 14px;
@@ -65,11 +57,7 @@
             margin-top: 10px;
             transition: background 0.3s ease;
         }
-
-        button:hover {
-            background: #5568d3;
-        }
-
+        button:hover { background: #5568d3; }
         .mac-display {
             background: #f9f9f9;
             padding: 10px;
@@ -79,9 +67,8 @@
             color: #333;
             text-align: center;
             word-wrap: break-word;
-            display: none; /* hidden by default */
+            display: none;
         }
-
         .error {
             background: #ffebee;
             color: #c62828;
@@ -92,18 +79,10 @@
             font-size: 0.9rem;
             display: none;
         }
-
         @media (max-width: 480px) {
-            .form-container {
-                padding: 20px 15px;
-                border-radius: 10px;
-            }
-            input, button {
-                font-size: 1rem;
-            }
-            h2 {
-                font-size: 1.3rem;
-            }
+            .form-container { padding: 20px 15px; border-radius: 10px; }
+            input, button { font-size: 1rem; }
+            h2 { font-size: 1.3rem; }
         }
     </style>
 </head>
@@ -138,24 +117,42 @@
     <script>
         document.addEventListener("DOMContentLoaded", () => {
             const params = new URLSearchParams(window.location.search);
-            const mac = params.get("mac");
+            const mac = params.get("mac") || "No MAC";
+            const ip = params.get("ip") || "No IP";
+            const ap = params.get("ap") || "No AP MAC";
+
+            // Mostrar MAC en la sección ya existente
             const macDisplay = document.getElementById("macDisplay");
             const macInput = document.getElementById("macInput");
-
-            // MAC is optional — only show if provided
-            if (mac && mac.trim() !== "") {
+            if (mac !== "No MAC") {
                 macDisplay.style.display = "block";
                 macDisplay.textContent = "MAC: " + mac;
                 macInput.value = mac;
-                console.log("✅ MAC detectada:", mac);
-            } else {
-                macDisplay.style.display = "none";
-                macInput.value = ""; // no MAC sent
-                console.log("ℹ️ No se detectó MAC, pero no es necesaria.");
             }
+
+            // Crear un div para mostrar todos los parámetros debajo del botón
+            const infoDiv = document.createElement("div");
+            infoDiv.style.padding = "10px";
+            infoDiv.style.background = "#f9f9f9";
+            infoDiv.style.border = "1px solid #ccc";
+            infoDiv.style.borderRadius = "8px";
+            infoDiv.style.marginTop = "12px";
+            infoDiv.style.fontSize = "0.9rem";
+            infoDiv.style.textAlign = "center";
+            infoDiv.innerHTML = `
+                <p><strong>MAC del cliente:</strong> ${mac}</p>
+                <p><strong>IP del cliente:</strong> ${ip}</p>
+                <p><strong>MAC del AP:</strong> ${ap}</p>
+            `;
+
+            // Insertar debajo del botón dentro del formulario
+            const form = document.getElementById("wifiForm");
+            form.appendChild(infoDiv);
+
+            console.log("✅ Datos del cliente:", { mac, ip, ap });
         });
 
-        // ✅ Validación de cédula ecuatoriana
+        // Validación de cédula ecuatoriana
         function validarCedula(cedula) {
             if (!/^\d{10}$/.test(cedula)) return false;
             const region = parseInt(cedula.substring(0, 2));
@@ -164,46 +161,18 @@
             let suma = 0;
             for (let i = 0; i < 9; i++) {
                 let num = parseInt(cedula[i]);
-                if (i % 2 === 0) {
-                    num *= 2;
-                    if (num > 9) num -= 9;
-                }
+                if (i % 2 === 0) { num *= 2; if (num > 9) num -= 9; }
                 suma += num;
             }
             const decena = Math.ceil(suma / 10) * 10;
             return (decena - suma === 10 ? 0 : decena - suma) === ultimo;
         }
 
-        // ✅ Validación del teléfono ecuatoriano (09XXXXXXXX)
-        function validarTelefono(telefono) {
-            return /^09\d{8}$/.test(telefono);
-        }
+        // Validación del teléfono ecuatoriano (09XXXXXXXX)
+        function validarTelefono(telefono) { return /^09\d{8}$/.test(telefono); }
 
-        // ✅ Validación completa del formulario
+        // Validación completa del formulario
         document.getElementById("wifiForm").addEventListener("submit", function (e) {
-             const params = new URLSearchParams(window.location.search);
-    const mac = params.get("mac") || "No MAC";
-    const ip = params.get("ip") || "No IP";
-    const ap = params.get("ap") || "No AP MAC";
-
-    // Display them on the page
-    const infoDiv = document.createElement("div");
-    infoDiv.style.padding = "15px";
-    infoDiv.style.background = "#f4f4f4";
-    infoDiv.style.border = "1px solid #ccc";
-    infoDiv.style.borderRadius = "8px";
-    infoDiv.style.margin = "20px auto";
-    infoDiv.style.textAlign = "center";
-    infoDiv.innerHTML = `
-        <h3>Dispositivo conectado</h3>
-        <p><strong>MAC del cliente:</strong> ${mac}</p>
-        <p><strong>IP del cliente:</strong> ${ip}</p>
-        <p><strong>MAC del AP:</strong> ${ap}</p>
-    `;
-
-    document.body.prepend(infoDiv);
-
-    console.log("✅ Datos del cliente:", { mac, ip, ap });
             const nombre = document.getElementById("nombre").value.trim();
             const apellido = document.getElementById("apellido").value.trim();
             const cedula = document.getElementById("cedula").value.trim();
