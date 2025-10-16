@@ -10,8 +10,10 @@ CREATE TABLE clients (
     cedula VARCHAR(20) NOT NULL,
     telefono VARCHAR(20) NOT NULL,
     email VARCHAR(100) NOT NULL,
+    mac VARCHAR(17) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
+
 
 -- FreeRADIUS authentication table
 CREATE TABLE radcheck (
