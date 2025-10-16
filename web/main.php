@@ -1,18 +1,5 @@
 <?php
-// ================================
-// 🔍 DEBUG: Log everything we receive from Aruba
-// ================================
-$debugLog = '/tmp/aruba_debug.log';
-$logFile  = '/tmp/registration_errors.log';
 
-function log_error($message) {
-    global $logFile;
-    file_put_contents($logFile, date("Y-m-d H:i:s") . " - " . $message . "\n", FILE_APPEND);
-}
-
-// ================================
-// Database connection
-// ================================
 $host = 'mysql_server';
 $db   = 'radius';
 $user = 'radius';
@@ -24,9 +11,6 @@ if (!$conn) {
     die("Database connection failed.");
 }
 
-// ================================
-// Helper: Validate Ecuadorian cédula
-// ================================
 function validarCedulaEcuatoriana($cedula) {
     if (!preg_match('/^\d{10}$/', $cedula)) return false;
     $provincia = intval(substr($cedula, 0, 2));
@@ -46,21 +30,7 @@ function validarCedulaEcuatoriana($cedula) {
     return $verificador == $ultimoDigito;
 }
 
-// ================================
-// 🔥 Detect variables: MAC, IP, AP MAC
-// ================================
-$mac = $_GET['client_mac'] ?? '';
-$ip  = $_GET['ip']  ?? ($_SERVER['REMOTE_ADDR'] ?? '');
-$ap  = $_GET['ap']  ?? ($_SERVER['HTTP_X_ARUBA_AP_MAC'] ?? '');
 
-// Clean MAC: remove colons, dashes, dots, lowercase
-$mac_clean = strtolower(str_replace([':', '-', '.'], '', $mac));
-
-log_error("DEBUG: MAC='$mac', Clean='$mac_clean', IP='$ip', AP='$ap', QUERY_STRING='{$_SERVER['QUERY_STRING']}'");
-
-// ================================
-// Process form submission
-// ================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $nombre   = trim($_POST['nombre'] ?? '');
@@ -82,12 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    // 2️⃣ Validate MAC
-    if (empty($mac_clean)) {
-        log_error("MAC missing during registration");
-        header("Location: principal.html?status=error&message=MAC%20no%20detectada&mac=$mac&ip=$ip&ap=$ap");
-        exit();
-    }
+    
 
     // 3️⃣ Validate cedula
     if (!validarCedulaEcuatoriana($cedula)) {

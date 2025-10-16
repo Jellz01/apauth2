@@ -94,19 +94,19 @@
     <div class="form-container">
         <h2>BIENVENIDOS</h2>
 
-        <form id="wifiForm" method="POST" action="main.php">
-            <input type="text" id="nombre" name="nombre" placeholder="Nombre" required>
-            <input type="text" id="apellido" name="apellido" placeholder="Apellido" required>
-            <input type="text" id="cedula" name="cedula" placeholder="Cédula" required>
-            <input type="tel" id="telefono" name="telefono" placeholder="Teléfono (09XXXXXXXX)" required pattern="09[0-9]{8}">
-            <input type="email" id="correo" name="correo" placeholder="Correo electrónico" required>
+       <form id="wifiForm" method="POST" action="main.php">
+    <input type="text" id="nombre" name="nombre" placeholder="Nombre" required>
+    <input type="text" id="apellido" name="apellido" placeholder="Apellido" required>
+    <input type="text" id="cedula" name="cedula" placeholder="Cédula" required>
+    <input type="tel" id="telefono" name="telefono" placeholder="Teléfono (09XXXXXXXX)" required pattern="09[0-9]{8}">
+    <input type="email" id="correo" name="correo" placeholder="Correo electrónico" required>
 
-            <!-- Optional MAC field -->
-            <input type="hidden" name="mac" id="macInput">
+    <!-- Hidden MAC field coming from Aruba -->
+    <input type="hidden" name="mac" value="<?php echo htmlspecialchars($_GET['client_mac'] ?? ''); ?>">
 
-            <button type="submit">Registrarse</button>
-            <div class="mac-display" id="macDisplay"></div>
-        </form>
+    <button type="submit">Registrarse</button>
+    <div class="mac-display" id="macDisplay"></div>
+</form>
 
         <div class="error" id="errorMsg"></div>
     </div>
