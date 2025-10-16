@@ -49,7 +49,7 @@ function validarCedulaEcuatoriana($cedula) {
 // ================================
 // 🔥 Detect variables: MAC, IP, AP MAC
 // ================================
-$mac = $_GET['mac'] ?? ($_SERVER['HTTP_X_ARUBA_MAC'] ?? '');
+$mac = $_GET['client_mac'] ?? '');
 $ip  = $_GET['ip']  ?? ($_SERVER['REMOTE_ADDR'] ?? '');
 $ap  = $_GET['ap']  ?? ($_SERVER['HTTP_X_ARUBA_AP_MAC'] ?? '');
 
