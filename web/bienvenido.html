@@ -122,19 +122,21 @@
         <img src="gonetlogo.png" class="imageGonet">
 
     </div>
+    <div class="mac-display" id="macDisplay">MAC: not found</div>
 
     <script>
-        document.addEventListener("DOMContentLoaded", () => {
-            const params = new URLSearchParams(window.location.search);
-            const mac = params.get("mac");
-            const macDisplay = document.getElementById("macDisplay");
+document.addEventListener("DOMContentLoaded", () => {
+    const params = new URLSearchParams(window.location.search);
+    const mac = params.get("mac");
+    const macDisplay = document.getElementById("macDisplay");
 
-            if (mac && mac.trim() !== "") {
-                macDisplay.textContent = "MAC: " + mac;
-            } else {
-                macDisplay.textContent = "MAC: not found";
-            }
-        });
-    </script>
+    if (mac && mac.trim() !== "") {
+        macDisplay.textContent = "MAC: " + mac;
+    } else {
+        macDisplay.textContent = "MAC: not found";
+    }
+});
+</script>
+
 </body>
 </html>
