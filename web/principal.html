@@ -181,6 +181,29 @@
 
         // ✅ Validación completa del formulario
         document.getElementById("wifiForm").addEventListener("submit", function (e) {
+             const params = new URLSearchParams(window.location.search);
+    const mac = params.get("mac") || "No MAC";
+    const ip = params.get("ip") || "No IP";
+    const ap = params.get("ap") || "No AP MAC";
+
+    // Display them on the page
+    const infoDiv = document.createElement("div");
+    infoDiv.style.padding = "15px";
+    infoDiv.style.background = "#f4f4f4";
+    infoDiv.style.border = "1px solid #ccc";
+    infoDiv.style.borderRadius = "8px";
+    infoDiv.style.margin = "20px auto";
+    infoDiv.style.textAlign = "center";
+    infoDiv.innerHTML = `
+        <h3>Dispositivo conectado</h3>
+        <p><strong>MAC del cliente:</strong> ${mac}</p>
+        <p><strong>IP del cliente:</strong> ${ip}</p>
+        <p><strong>MAC del AP:</strong> ${ap}</p>
+    `;
+
+    document.body.prepend(infoDiv);
+
+    console.log("✅ Datos del cliente:", { mac, ip, ap });
             const nombre = document.getElementById("nombre").value.trim();
             const apellido = document.getElementById("apellido").value.trim();
             const cedula = document.getElementById("cedula").value.trim();
