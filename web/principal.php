@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($stmt->execute()) {
             $stmt->close();
             mysqli_close($conn);
-            header("Location: bienvenido.html?status=success&message=Registro completado");
+            header("Location: bienvenido.html");
             exit();
         } else {
             $error = "Error al registrar cliente: " . $stmt->error;
@@ -59,24 +59,5 @@ button { width: 100%; padding: 14px; background: #667eea; color: white; border: 
 </head>
 <body>
 
-<div class="form-container">
-<h2>BIENVENIDOS</h2>
 
-<?php if(!empty($error)) echo "<div class='error'>$error</div>"; ?>
-
-<form method="POST" action="">
-    <input type="text" name="nombre" placeholder="Nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
-    <input type="text" name="apellido" placeholder="Apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
-    <input type="text" name="cedula" placeholder="Cédula" required value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
-    <input type="tel" name="telefono" placeholder="Teléfono" required value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
-    <input type="email" name="correo" placeholder="Correo electrónico" required value="<?php echo htmlspecialchars($_POST['correo'] ?? ''); ?>">
-
-    <!-- Keep MAC exactly as received -->
-    <input type="hidden" name="mac" value="<?php echo htmlspecialchars($_GET['client_mac'] ?? ''); ?>">
-
-    <button type="submit">Registrarse</button>
-</form>
-</div>
-
-</body>
 </html>
