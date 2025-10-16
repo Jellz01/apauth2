@@ -3,19 +3,12 @@
 // 🔍 DEBUG: Log everything we receive from Aruba
 // ================================
 $debugLog = '/tmp/aruba_debug.log';
-$debug = [
-    'timestamp' => date("Y-m-d H:i:s"),
-    'REQUEST_METHOD' => $_SERVER['REQUEST_METHOD'] ?? 'not set',
-    'REQUEST_URI' => $_SERVER['REQUEST_URI'] ?? 'not set',
-    'QUERY_STRING' => $_SERVER['QUERY_STRING'] ?? 'not set',
-    'REMOTE_ADDR' => $_SERVER['REMOTE_ADDR'] ?? 'not set',
-    'HTTP_USER_AGENT' => $_SERVER['HTTP_USER_AGENT'] ?? 'not set',
-    'GET' => $_GET,
-    'POST' => $_POST,
-    'HEADERS' => getallheaders(),
-    'SERVER' => $_SERVER
-];
-file_put_contents($debugLog, print_r($debug, true) . "\n\n", FILE_APPEND);
+$logFile  = '/tmp/registration_errors.log';
+
+function log_error($message) {
+    global $logFile;
+    file_put_contents($logFile, date("Y-m-d H:i:s") . " - " . $message . "\n", FILE_APPEND);
+}
 
 // ================================
 // Database connection
@@ -27,20 +20,12 @@ $pass = 'dalodbpass';
 
 $conn = mysqli_connect($host, $user, $pass, $db);
 if (!$conn) {
-    die("Database connection failed: " . mysqli_connect_error());
+    log_error("Database connection failed: " . mysqli_connect_error());
+    die("Database connection failed.");
 }
 
 // ================================
-// Helper function for logging errors
-// ================================
-$logFile = '/tmp/registration_errors.log';
-function log_error($message) {
-    global $logFile;
-    file_put_contents($logFile, date("Y-m-d H:i:s") . " - " . $message . "\n", FILE_APPEND);
-}
-
-// ================================
-// Validate Ecuadorian cédula
+// Helper: Validate Ecuadorian cédula
 // ================================
 function validarCedulaEcuatoriana($cedula) {
     if (!preg_match('/^\d{10}$/', $cedula)) return false;
@@ -62,24 +47,22 @@ function validarCedulaEcuatoriana($cedula) {
 }
 
 // ================================
-// 🔥 Detect MAC
+// 🔥 Detect variables: MAC, IP, AP MAC
 // ================================
-$mac = $_GET['mac'] ?? '';
+$mac = $_GET['mac'] ?? ($_SERVER['HTTP_X_ARUBA_MAC'] ?? '');
+$ip  = $_GET['ip']  ?? ($_SERVER['REMOTE_ADDR'] ?? '');
+$ap  = $_GET['ap']  ?? ($_SERVER['HTTP_X_ARUBA_AP_MAC'] ?? '');
 
-// Try headers if URL parameter is missing
-if (empty($mac) && isset($_SERVER['HTTP_X_ARUBA_MAC'])) {
-    $mac = $_SERVER['HTTP_X_ARUBA_MAC'];
-}
-
-// Normalize MAC: remove colons, dashes, dots, lowercase
+// Clean MAC: remove colons, dashes, dots, lowercase
 $mac_clean = strtolower(str_replace([':', '-', '.'], '', $mac));
 
-log_error("MAC detected: GET mac='$mac', Cleaned='$mac_clean'");
+log_error("DEBUG: MAC='$mac', Clean='$mac_clean', IP='$ip', AP='$ap', QUERY_STRING='{$_SERVER['QUERY_STRING']}'");
 
 // ================================
 // Process form submission
 // ================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
     $nombre   = trim($_POST['nombre'] ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
     $cedula   = trim($_POST['cedula'] ?? '');
@@ -89,38 +72,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($mac_from_form)) {
         $mac_clean = strtolower(str_replace([':', '-', '.'], '', $mac_from_form));
-        log_error("MAC from form: '$mac_from_form', Cleaned='$mac_clean'");
+        log_error("MAC from form detected: '$mac_from_form', Clean='$mac_clean'");
     }
 
     // 1️⃣ Required fields
     if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
         log_error("Missing required fields");
-        header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios.");
+        header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios&mac=$mac&ip=$ip&ap=$ap");
         exit();
     }
 
     // 2️⃣ Validate MAC
     if (empty($mac_clean)) {
         log_error("MAC missing during registration");
-        header("Location: principal.html?status=error&message=Error:%20MAC%20no%20detectada.");
+        header("Location: principal.html?status=error&message=MAC%20no%20detectada&mac=$mac&ip=$ip&ap=$ap");
         exit();
     }
 
     // 3️⃣ Validate cedula
     if (!validarCedulaEcuatoriana($cedula)) {
         log_error("Invalid cedula: $cedula");
-        header("Location: principal.html?status=error&message=Cédula%20inválida.");
+        header("Location: principal.html?status=error&message=Cédula%20inválida&mac=$mac&ip=$ip&ap=$ap");
         exit();
     }
 
     // 4️⃣ Validate phone
     if (!preg_match('/^09\d{8}$/', $telefono)) {
         log_error("Invalid phone: $telefono");
-        header("Location: principal.html?status=error&message=Teléfono%20inválido.");
+        header("Location: principal.html?status=error&message=Teléfono%20inválido&mac=$mac&ip=$ip&ap=$ap");
         exit();
     }
 
-    // 5️⃣ Insert client
+    // 5️⃣ Insert client into database
     $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac) VALUES (?, ?, ?, ?, ?, ?)");
     if (!$stmt) {
         log_error("Prepare insert client failed: " . $conn->error);
@@ -150,8 +133,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt3->close();
         }
 
-        // 8️⃣ Redirect to welcome
-        header("Location: bienvenido.html?status=success&message=Registro%20completado");
+        // 8️⃣ Redirect to welcome page
+        header("Location: bienvenido.html?status=success&message=Registro%20completado&mac=$mac&ip=$ip&ap=$ap");
         exit();
 
     } else {
@@ -159,15 +142,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die("DB error.");
     }
     $stmt->close();
+
 } else {
-    // Show form with MAC pre-filled if available
-    if (!empty($mac)) {
-        log_error("Redirect to form with MAC=$mac");
-        header("Location: principal.html?mac=" . urlencode($mac));
-    } else {
-        log_error("Redirect to form without MAC");
-        header("Location: principal.html");
-    }
+    // GET request: redirect to principal.html with detected variables
+    $redirect_url = "principal.html?mac=" . urlencode($mac) . "&ip=" . urlencode($ip) . "&ap=" . urlencode($ap);
+    log_error("Redirecting to: $redirect_url");
+    header("Location: $redirect_url");
     exit();
 }
 
