@@ -79,6 +79,7 @@
             color: #333;
             text-align: center;
             word-wrap: break-word;
+            display: none; /* hidden by default */
         }
 
         .error {
@@ -121,10 +122,11 @@
             <input type="tel" id="telefono" name="telefono" placeholder="Teléfono (09XXXXXXXX)" required pattern="09[0-9]{8}">
             <input type="email" id="correo" name="correo" placeholder="Correo electrónico" required>
 
+            <!-- Optional MAC field -->
             <input type="hidden" name="mac" id="macInput">
 
             <button type="submit">Registrarse</button>
-            <div class="mac-display" id="macDisplay">MAC: not found</div>
+            <div class="mac-display" id="macDisplay"></div>
         </form>
 
         <div class="error" id="errorMsg"></div>
@@ -140,29 +142,25 @@
             const macDisplay = document.getElementById("macDisplay");
             const macInput = document.getElementById("macInput");
 
+            // MAC is optional — only show if provided
             if (mac && mac.trim() !== "") {
+                macDisplay.style.display = "block";
                 macDisplay.textContent = "MAC: " + mac;
                 macInput.value = mac;
                 console.log("✅ MAC detectada:", mac);
             } else {
-                macDisplay.textContent = "MAC: not found";
-                console.warn("⚠️ No se detectó la MAC en la URL.");
+                macDisplay.style.display = "none";
+                macInput.value = ""; // no MAC sent
+                console.log("ℹ️ No se detectó MAC, pero no es necesaria.");
             }
         });
 
         // ✅ Validación de cédula ecuatoriana
         function validarCedula(cedula) {
-            if (!/^\d{10}$/.test(cedula)) {
-                console.error("❌ Cédula debe tener exactamente 10 dígitos.");
-                return false;
-            }
-            const digitoRegion = parseInt(cedula.substring(0, 2));
-            if (digitoRegion < 1 || digitoRegion > 24) {
-                console.error("❌ Región inválida en cédula:", digitoRegion);
-                return false;
-            }
-
-            const ultimoDigito = parseInt(cedula[9]);
+            if (!/^\d{10}$/.test(cedula)) return false;
+            const region = parseInt(cedula.substring(0, 2));
+            if (region < 1 || region > 24) return false;
+            const ultimo = parseInt(cedula[9]);
             let suma = 0;
             for (let i = 0; i < 9; i++) {
                 let num = parseInt(cedula[i]);
@@ -173,18 +171,12 @@
                 suma += num;
             }
             const decena = Math.ceil(suma / 10) * 10;
-            const digitoValidador = decena - suma;
-            const valido = (digitoValidador === 10 ? 0 : digitoValidador) === ultimoDigito;
-
-            if (!valido) console.error("❌ Dígito verificador incorrecto en cédula:", cedula);
-            return valido;
+            return (decena - suma === 10 ? 0 : decena - suma) === ultimo;
         }
 
         // ✅ Validación del teléfono ecuatoriano (09XXXXXXXX)
         function validarTelefono(telefono) {
-            const valido = /^09\d{8}$/.test(telefono);
-            if (!valido) console.error("❌ Teléfono inválido:", telefono);
-            return valido;
+            return /^09\d{8}$/.test(telefono);
         }
 
         // ✅ Validación completa del formulario
@@ -196,13 +188,10 @@
             const correo = document.getElementById("correo").value.trim();
             const errorMsg = document.getElementById("errorMsg");
 
-            console.log("📋 Validando formulario...");
-
             if (!nombre || !apellido || !cedula || !telefono || !correo) {
                 e.preventDefault();
                 errorMsg.textContent = "⚠️ Todos los campos son obligatorios.";
                 errorMsg.style.display = "block";
-                console.error("❌ Error: Campos vacíos detectados.");
                 return;
             }
 

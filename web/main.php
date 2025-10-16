@@ -45,15 +45,15 @@ if (!$conn) {
 
 // ✅ Process form
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nombre   = trim($_POST['nombre']);
-    $apellido = trim($_POST['apellido']);
-    $cedula   = trim($_POST['cedula']);
-    $telefono = trim($_POST['telefono']);
-    $correo   = trim($_POST['correo']);
-    $mac      = strtoupper(trim($_POST['mac']));
+    $nombre   = trim($_POST['nombre'] ?? '');
+    $apellido = trim($_POST['apellido'] ?? '');
+    $cedula   = trim($_POST['cedula'] ?? '');
+    $telefono = trim($_POST['telefono'] ?? '');
+    $correo   = trim($_POST['correo'] ?? '');
+    $mac      = strtoupper(trim($_POST['mac'] ?? '')); // optional now
 
-    // ✅ 1. Check required fields
-    if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo || !$mac) {
+    // ✅ 1. Check required fields (MAC not required)
+    if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
         header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios.");
         exit();
     }
@@ -82,31 +82,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($stmt->execute()) {
         $client_id = $conn->insert_id;
 
-        // ✅ Insert into FreeRADIUS
-        $stmt2 = $conn->prepare("
-            INSERT INTO radcheck (client_id, username, attribute, op, value)
-            VALUES (?, ?, 'Cleartext-Password', ':=', ?)
-        ");
-        if (!$stmt2) {
-            log_error("Prepare failed (radcheck): " . $conn->error);
-            die("Error preparando la inserción en FreeRADIUS.");
+        // ✅ Optional: Insert into FreeRADIUS *only if MAC exists*
+        if (!empty($mac)) {
+            $stmt2 = $conn->prepare("
+                INSERT INTO radcheck (client_id, username, attribute, op, value)
+                VALUES (?, ?, 'Cleartext-Password', ':=', ?)
+            ");
+            if ($stmt2) {
+                $username = $mac;
+                $password = $mac;
+                $stmt2->bind_param("iss", $client_id, $username, $password);
+                if (!$stmt2->execute()) {
+                    log_error("Execute failed (radcheck): " . $stmt2->error);
+                }
+                $stmt2->close();
+            } else {
+                log_error("Prepare failed (radcheck): " . $conn->error);
+            }
         }
 
-        $username = $mac;
-        $password = $mac;
-        $stmt2->bind_param("iss", $client_id, $username, $password);
-
-        if (!$stmt2->execute()) {
-            log_error("Execute failed (radcheck): " . $stmt2->error);
-            die("Error al insertar en FreeRADIUS.");
-        }
-
-        header("Location: bienvenido.html?status=success&message=Registro%20completado.%20Usuario:%20$mac");
+        // ✅ Redirect to welcome page
+        header("Location: bienvenido.html?status=success&message=Registro%20completado.");
         exit();
     } else {
         log_error("Execute failed (insert client): " . $stmt->error);
         die("Error al registrar el cliente: " . $stmt->error);
     }
+
+    $stmt->close();
 } else {
     header("Location: principal.html");
     exit();
