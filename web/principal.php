@@ -40,6 +40,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $correo   = trim($_POST['correo'] ?? '');
     $mac_from_form = trim($_POST['mac'] ?? '');
 
+    // If empty, give a default MAC (or leave as empty string if column allows it)
+    if (empty($mac_from_form)) {
+        $mac_clean = '00:00:00:00:00:00'; // default placeholder
+    } else {
+        // Clean MAC (remove :, -, .)
+        $mac_clean = strtolower(str_replace([':', '-', '.'], '', $mac_from_form));
+    }
+
+
     // Validate required fields
     if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
         $error = "Todos los campos son obligatorios.";
@@ -48,9 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!preg_match('/^09\d{8}$/', $telefono)) {
         $error = "Teléfono inválido.";
     } else {
-        // Clean MAC
-        $mac_clean = strtolower(str_replace([':', '-', '.'], '', $mac_from_form));
-
+       
         $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac) VALUES (?, ?, ?, ?, ?, ?)");
         if (!$stmt) {
             die("DB prepare error: " . $conn->error);
