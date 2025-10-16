@@ -2,9 +2,13 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Registro - WiFi Público</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -13,56 +17,84 @@
             align-items: center;
             min-height: 100vh;
             margin: 0;
+            padding: 10px;
         }
+
         .form-container {
             background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            padding: 25px 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+            width: 100%;
             max-width: 400px;
-            width: 90%;
         }
+
         h2 { 
             color: #333; 
             text-align: center;
             margin-bottom: 20px;
+            font-size: 1.4rem;
         }
+
         input {
             width: 100%;
-            padding: 10px;
+            padding: 12px;
             margin: 8px 0;
             border: 1px solid #ddd;
-            border-radius: 5px;
-            box-sizing: border-box;
+            border-radius: 8px;
+            font-size: 1rem;
         }
+
         button {
             width: 100%;
-            padding: 12px;
+            padding: 14px;
             background: #667eea;
             color: white;
             border: none;
-            border-radius: 5px;
-            font-size: 16px;
+            border-radius: 8px;
+            font-size: 1.05rem;
             cursor: pointer;
             margin-top: 10px;
+            transition: background 0.3s ease;
         }
-        button:hover { background: #5568d3; }
+
+        button:hover {
+            background: #5568d3;
+        }
+
         .mac-display {
-            background: #f0f0f0;
+            background: #f9f9f9;
             padding: 10px;
-            border-radius: 5px;
-            margin: 15px 0;
-            font-size: 13px;
-            color: #666;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-size: 0.9rem;
+            color: #333;
             text-align: center;
+            word-wrap: break-word;
         }
+
         .error {
             background: #ffebee;
             color: #c62828;
             padding: 10px;
-            border-radius: 5px;
+            border-radius: 8px;
             margin: 10px 0;
             text-align: center;
+            font-size: 0.9rem;
+        }
+
+        /* 📱 Mobile adjustments */
+        @media (max-width: 480px) {
+            .form-container {
+                padding: 20px 15px;
+                border-radius: 10px;
+            }
+            input, button {
+                font-size: 1rem;
+            }
+            h2 {
+                font-size: 1.3rem;
+            }
         }
     </style>
 </head>
@@ -70,5 +102,32 @@
     <div class="form-container">
         <h2>Registro WiFi Público</h2>
         
-        <div class="mac-display" id="macDisplay">Detectando dispositivo...</div>
-        <div class="error" id="errorMsg"
+        <form method="POST" action="main.php">
+            <input type="text" name="nombre" placeholder="Nombre" required>
+            <input type="text" name="apellido" placeholder="Apellido" required>
+            <input type="text" name="cedula" placeholder="Cédula" required>
+            <input type="email" name="correo" placeholder="Correo electrónico" required>
+            <button type="submit">Registrarse</button>
+
+            <!-- ✅ MAC shown just below the button -->
+            <div class="mac-display" id="macDisplay">MAC: not found</div>
+        </form>
+
+        <div class="error" id="errorMsg" style="display:none;"></div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const params = new URLSearchParams(window.location.search);
+            const mac = params.get("mac");
+            const macDisplay = document.getElementById("macDisplay");
+
+            if (mac && mac.trim() !== "") {
+                macDisplay.textContent = "MAC: " + mac;
+            } else {
+                macDisplay.textContent = "MAC: not found";
+            }
+        });
+    </script>
+</body>
+</html>
