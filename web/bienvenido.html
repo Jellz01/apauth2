@@ -96,24 +96,31 @@
                 font-size: 1.3rem;
             }
         }
+
+
+
+        
+        .textoBienvenidos{
+            color: white;
+            font-weight: 900;
+            font-size: 50px;
+
+        }
+
+        .imageGonet{
+            display:block;
+            position: relative;
+
+        }
     </style>
 </head>
 <body>
-    <div class="form-container">
-        <h2>Registro WiFi Público</h2>
-        
-        <form method="POST" action="main.php">
-            <input type="text" name="nombre" placeholder="Nombre" required>
-            <input type="text" name="apellido" placeholder="Apellido" required>
-            <input type="text" name="cedula" placeholder="Cédula" required>
-            <input type="email" name="correo" placeholder="Correo electrónico" required>
-            <button type="submit">Registrarse</button>
+   
+    <div class="bienvenidosContainer">
 
-            <!-- ✅ MAC shown just below the button -->
-            <div class="mac-display" id="macDisplay">MAC: not found</div>
-        </form>
+        <h2 class="textoBienvenidos">BIENVENIDOS</h2>
+        <img src="gonetlogo.png" class="imageGonet">
 
-        <div class="error" id="errorMsg" style="display:none;"></div>
     </div>
 
     <script>
