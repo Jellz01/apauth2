@@ -1,6 +1,7 @@
 version: "3.9"
 
 services:
+
   mysql:
     image: mysql:8.0.42
     container_name: mysql_server
@@ -13,17 +14,25 @@ services:
     ports:
       - "3306:3306"
     volumes:
+      # Initializes the DB schema (tables)
       - ./mysql-init:/docker-entrypoint-initdb.d
+      # Persists database data
       - ./radius-mysql:/var/lib/mysql
     networks:
       - dalonet
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   freeradius:
     build: ./FreeRadius
     container_name: freeradius_server
     restart: always
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
       MYSQL_HOST: mysql
       MYSQL_USER: radius
@@ -32,9 +41,7 @@ services:
     ports:
       - "1812:1812/udp"
       - "1813:1813/udp"
-    volumes:
-      - ./clients.conf:/etc/freeradius/3.0/clients.conf
-      - radius_data:/etc/freeradius
+  
     networks:
       - dalonet
 
@@ -42,6 +49,8 @@ services:
     build: ./web
     container_name: php_web
     restart: always
+    depends_on:
+      - mysql
     ports:
       - "8080:80"
     volumes:
@@ -51,14 +60,9 @@ services:
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
       MYSQL_DATABASE: radius
-    depends_on:
-      - mysql
     networks:
       - dalonet
 
 networks:
   dalonet:
     driver: bridge
-
-volumes:
-  radius_data:

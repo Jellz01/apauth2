@@ -1,0 +1,13 @@
+sql {
+    driver = "rlm_sql_mysql"
+    dialect = "mysql"
+
+    server     = "${env.MYSQL_HOST:-mysql}"
+    port       = 3306
+    login      = "${env.MYSQL_USER:-radius}"
+    password   = "${env.MYSQL_PASSWORD:-dalodbpass}"
+    radius_db  = "${env.MYSQL_DATABASE:-radius}"
+
+    read_clients = yes
+    connect_failure_retry_delay = 60
+}
