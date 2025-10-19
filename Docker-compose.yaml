@@ -1,7 +1,6 @@
 version: "3.9"
 
 services:
-
   mysql:
     image: mysql:8.0.42
     container_name: mysql_server
@@ -14,9 +13,9 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      # Initializes the DB schema (tables)
+     
       - ./mysql-init:/docker-entrypoint-initdb.d
-      # Persists database data
+      
       - ./radius-mysql:/var/lib/mysql
     networks:
       - dalonet
@@ -34,14 +33,13 @@ services:
       mysql:
         condition: service_healthy
     environment:
-      MYSQL_HOST: mysql
+      MYSQL_HOST: mysql_server
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
       MYSQL_DATABASE: radius
     ports:
       - "1812:1812/udp"
       - "1813:1813/udp"
-  
     networks:
       - dalonet
 
@@ -56,7 +54,7 @@ services:
     volumes:
       - ./web:/var/www/html
     environment:
-      MYSQL_HOST: mysql
+      MYSQL_HOST: mysql_server
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
       MYSQL_DATABASE: radius

@@ -16,7 +16,6 @@ RUN echo 'Acquire::Check-Valid-Until "false";\nAcquire::Check-Date "false";' \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         freeradius \
-        gettext \
         freeradius-config \
         freeradius-mysql \
         freeradius-utils \
@@ -27,9 +26,6 @@ RUN echo 'Acquire::Check-Valid-Until "false";\nAcquire::Check-Date "false";' \
         gettext-base && \
     rm -rf /var/lib/apt/lists/*
 
-  RUN apt-get update && apt-get install -y gettext-base
-
-
 # -------------------------------------------------------------
 # ✅ Copy configs
 # -------------------------------------------------------------
@@ -37,6 +33,12 @@ COPY mods-enabled/sql /etc/freeradius/3.0/mods-enabled/sql
 COPY sites-enabled/default /etc/freeradius/3.0/sites-enabled/default
 COPY clients.conf /etc/freeradius/3.0/clients.conf
 COPY insert_mac.sh /etc/freeradius/insert_mac.sh
+
+# -------------------------------------------------------------
+# ✅ Copy entrypoint script
+# -------------------------------------------------------------
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # -------------------------------------------------------------
 # ✅ Permissions
@@ -48,7 +50,6 @@ RUN chown -R freerad:freerad /etc/freeradius && \
     find /etc/freeradius/3.0/ -type d -exec chmod 750 {} \; && \
     chmod +x /etc/freeradius/insert_mac.sh
 
-
 # -------------------------------------------------------------
 # ✅ Expose ports
 # -------------------------------------------------------------
@@ -56,12 +57,6 @@ EXPOSE 1812/udp
 EXPOSE 1813/udp
 
 # -------------------------------------------------------------
-# ✅ Runtime entrypoint: export env vars before starting radius
+# ✅ Start with entrypoint script
 # -------------------------------------------------------------
-ENTRYPOINT ["/bin/bash", "-c", "\
-  /usr/bin/envsubst < /etc/freeradius/3.0/mods-enabled/sql > /tmp/sql && \
-  mv /tmp/sql /etc/freeradius/3.0/mods-enabled/sql && \
-  exec freeradius -f -l stdout -X \
-"]
-
-
+ENTRYPOINT ["/entrypoint.sh"]
