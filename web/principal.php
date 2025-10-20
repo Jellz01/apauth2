@@ -26,10 +26,10 @@ $url = isset($_GET['url']) ? htmlspecialchars($_GET['url']) : '';
 $ap_mac = isset($_GET['ap_mac']) ? htmlspecialchars($_GET['ap_mac']) : '';
 $essid = isset($_GET['essid']) ? htmlspecialchars($_GET['essid']) : '';
 
+// ----------------------------
+// 📥 Process Form Submission
+// ----------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // ----------------------------
-    // 📥 Get Form Data
-    // ----------------------------
     $nombre   = $_POST['nombre'];
     $apellido = $_POST['apellido'];
     $cedula   = $_POST['cedula'];
@@ -51,10 +51,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $check->store_result();
 
     if ($check->num_rows > 0) {
-        echo "<script>alert('⚠️ This device is already registered.');</script>";
-        // Redirect back to AP with success
+        // Device already registered - redirect immediately
         if (!empty($url)) {
             header("Location: " . urldecode($url));
+            exit;
+        } else {
+            header("Location: bienvenido.html");
             exit;
         }
     } else {
@@ -78,22 +80,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 die("<div class='error'>Prepare failed (radcheck): " . htmlspecialchars($conn->error) . "</div>");
             }
             $rad->bind_param("s", $mac);
+            
             if ($rad->execute()) {
                 // ----------------------------
-                // 🔄 Redirect back to Aruba AP (RAUTH)
+                // 🔄 Redirect back to Aruba AP (RAUTH) or welcome page
                 // ----------------------------
                 if (!empty($url)) {
-                    
                     header("Location: " . urldecode($url));
                     exit;
                 } else {
-                    echo "<script>alert('✅ Device registered successfully! You can now connect.'); window.location='bienvenido.html';</script>";
+                    header("Location: bienvenido.html");
+                    exit;
                 }
             } else {
-                echo "<div class='error'>Error inserting into radcheck: " . htmlspecialchars($rad->error) . "</div>";
+                die("<div class='error'>Error inserting into radcheck: " . htmlspecialchars($rad->error) . "</div>");
             }
         } else {
-            echo "<div class='error'>Error inserting into clients: " . htmlspecialchars($stmt->error) . "</div>";
+            die("<div class='error'>Error inserting into clients: " . htmlspecialchars($stmt->error) . "</div>");
         }
     }
 }
@@ -166,4 +169,3 @@ button:hover { background: #5568d3; }
 
 </body>
 </html>
-
