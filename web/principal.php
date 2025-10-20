@@ -1,30 +1,45 @@
 <?php
 // register_client.php
 
-// Database connection
-$host = "mysql_server";
+// ----------------------------
+// 🔧 Database Configuration
+// ----------------------------
+$host = "mysql_server";   // Change to 127.0.0.1 if not using Docker
 $user = "radius";
 $pass = "dalodbpass";
 $db   = "radius";
 
+// ----------------------------
+// 🔌 Database Connection
+// ----------------------------
 $conn = new mysqli($host, $user, $pass, $db);
 if ($conn->connect_error) {
-    die("<div class='error'>Database connection failed: " . $conn->connect_error . "</div>");
+    die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($conn->connect_error) . "</div>");
 }
 
-// Get MAC from URL (sent by the AP)
+// ----------------------------
+// 🧾 Get MAC from URL
+// ----------------------------
 $mac = isset($_GET['mac']) ? htmlspecialchars($_GET['mac']) : '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // ----------------------------
+    // 📥 Get Form Data
+    // ----------------------------
     $nombre   = $_POST['nombre'];
     $apellido = $_POST['apellido'];
     $cedula   = $_POST['cedula'];
     $telefono = $_POST['telefono'];
     $email    = $_POST['email'];
-    $mac      = $_POST['mac']; // hidden input value
+    $mac      = $_POST['mac']; // Hidden field
 
-    // Check if MAC already registered
+    // ----------------------------
+    // 🕵️ Check if MAC already registered
+    // ----------------------------
     $check = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
+    if (!$check) {
+        die("<div class='error'>Prepare failed (check): " . htmlspecialchars($conn->error) . "</div>");
+    }
     $check->bind_param("s", $mac);
     $check->execute();
     $check->store_result();
@@ -32,20 +47,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($check->num_rows > 0) {
         echo "<script>alert('⚠️ This device is already registered.');</script>";
     } else {
-        // Insert client info
-        $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-                                VALUES (?, ?, ?, ?, ?, ?, 1)");
+        // ----------------------------
+        // 🧩 Insert into clients table
+        // ----------------------------
+        $query = "INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
+                  VALUES (?, ?, ?, ?, ?, ?, 1)";
+        $stmt = $conn->prepare($query);
+        if (!$stmt) {
+            die("<div class='error'>Prepare failed (clients): " . htmlspecialchars($conn->error) . "</div>");
+        }
         $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac);
 
         if ($stmt->execute()) {
-            // Also insert into radcheck for MAC authentication
+            // ----------------------------
+            // ✅ Also insert into radcheck
+            // ----------------------------
             $rad = $conn->prepare("INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Auth-Type', ':=', 'Accept')");
+            if (!$rad) {
+                die("<div class='error'>Prepare failed (radcheck): " . htmlspecialchars($conn->error) . "</div>");
+            }
             $rad->bind_param("s", $mac);
-            $rad->execute();
-
-            echo "<script>alert('✅ Device registered successfully! You can now connect.'); window.location='success.html';</script>";
+            if ($rad->execute()) {
+                echo "<script>alert('✅ Device registered successfully! You can now connect.'); window.location='success.html';</script>";
+            } else {
+                echo "<div class='error'>Error inserting into radcheck: " . htmlspecialchars($rad->error) . "</div>";
+            }
         } else {
-            echo "<div class='error'>⚠️ Error: " . htmlspecialchars($stmt->error) . "</div>";
+            echo "<div class='error'>Error inserting into clients: " . htmlspecialchars($stmt->error) . "</div>";
         }
     }
 }
@@ -55,6 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
 <meta charset="UTF-8">
 <title>Client Registration</title>
+
 <style>
 * { box-sizing: border-box; }
 body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 10px; }
