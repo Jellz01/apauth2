@@ -54,73 +54,76 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $mac_formatted = implode(':', str_split($mac, 2));
 
     // Check if MAC already registered
-    $check = $conn->prepare("SELECT COUNT(*) FROM clients WHERE mac = ? OR mac = ?");
+    $check = $conn->prepare("SELECT enabled FROM clients WHERE mac = ? OR mac = ?");
     $check->bind_param("ss", $mac, $mac_formatted);
     $check->execute();
-    $check->bind_result($exists);
-    $check->fetch();
+    $check->bind_result($enabled);
+    $exists = $check->fetch();
     $check->close();
 
-    if ((int)$exists === 0) {
-        // Iniciar transacción
-        $conn->begin_transaction();
-        
-        try {
-            // 1. Insertar en tabla clients (tu tabla personalizada)
-            $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-                                    VALUES (?, ?, ?, ?, ?, ?, 1)");
-            $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac_formatted);
-            $stmt->execute();
-            $stmt->close();
-
-            // 2. Insertar en radcheck (tabla de FreeRADIUS para autenticación)
-            $stmt_radius = $conn->prepare("INSERT INTO radcheck (username, attribute, op, value) 
-                                           VALUES (?, 'Cleartext-Password', ':=', ?)");
-            $stmt_radius->bind_param("ss", $mac_formatted, $mac_formatted);
-            $stmt_radius->execute();
-            $stmt_radius->close();
-
-            // 3. Opcional: Agregar atributos de respuesta en radreply
-            $stmt_reply = $conn->prepare("INSERT INTO radreply (username, attribute, op, value) 
-                                          VALUES (?, 'Reply-Message', '=', ?)");
-            $welcome_msg = "Bienvenido/a $nombre $apellido";
-            $stmt_reply->bind_param("ss", $mac_formatted, $welcome_msg);
-            $stmt_reply->execute();
-            $stmt_reply->close();
-
-            // Confirmar transacción
-            $conn->commit();
-
+    if ($exists) {
+        // MAC ya existe
+        if ($enabled == 1) {
+            // Ya está habilitada
             echo "<div style='text-align: center; padding: 50px; font-family: Arial;'>";
-            echo "<h2>✅ ¡Registro exitoso!</h2>";
-            echo "<p>Bienvenido/a <strong>$nombre $apellido</strong></p>";
-            echo "<p>Tu dispositivo (<code>$mac_formatted</code>) ha sido autorizado.</p>";
+            echo "<h2>ℹ️ Dispositivo ya registrado</h2>";
+            echo "<p>Este dispositivo (<code>$mac_formatted</code>) ya está autorizado.</p>";
             echo "<p>Ya puedes navegar en Internet.</p>";
             echo "<hr>";
-            echo "<small>Si no te redirige automáticamente, <a href='http://google.com'>haz clic aquí</a></small>";
+            echo "<small><a href='http://google.com'>Continuar navegando</a></small>";
             echo "</div>";
+            echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 2000);</script>";
+        } else {
+            // Existe pero no está habilitada - activarla
+            $update = $conn->prepare("UPDATE clients SET enabled = 1 WHERE mac = ? OR mac = ?");
+            $update->bind_param("ss", $mac, $mac_formatted);
+            $update->execute();
+            $update->close();
             
-            // Redireccionar automáticamente después de 3 segundos
-            echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 3000);</script>";
-
-        } catch (Exception $e) {
-            // Revertir transacción en caso de error
-            $conn->rollback();
-            echo "<h3>⚠️ Error al registrar: " . htmlspecialchars($e->getMessage()) . "</h3>";
-            echo "<a href='?client_mac=" . urlencode($mac) . "'>← Volver al formulario</a>";
+            echo "<div style='text-align: center; padding: 50px; font-family: Arial;'>";
+            echo "<h2>✅ ¡Dispositivo activado!</h2>";
+            echo "<p>Tu dispositivo (<code>$mac_formatted</code>) ha sido habilitado.</p>";
+            echo "<p>Ya puedes navegar en Internet.</p>";
+            echo "<hr>";
+            echo "<small><a href='http://google.com'>Continuar navegando</a></small>";
+            echo "</div>";
+            echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 2000);</script>";
         }
+        $conn->close();
+        exit;
+    }
 
-    } else {
+    // MAC no existe - registrar nuevo usuario
+    $conn->begin_transaction();
+    
+    try {
+        // 1. Insertar en tabla clients con enabled = 1 (acceso inmediato)
+        $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
+                                VALUES (?, ?, ?, ?, ?, ?, 1)");
+        $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac_formatted);
+        $stmt->execute();
+        $stmt->close();
+
+        // Confirmar transacción
+        $conn->commit();
+
         echo "<div style='text-align: center; padding: 50px; font-family: Arial;'>";
-        echo "<h2>ℹ️ Dispositivo ya registrado</h2>";
-        echo "<p>Este dispositivo (<code>$mac_formatted</code>) ya está autorizado.</p>";
+        echo "<h2>✅ ¡Registro exitoso!</h2>";
+        echo "<p>Bienvenido/a <strong>$nombre $apellido</strong></p>";
+        echo "<p>Tu dispositivo (<code>$mac_formatted</code>) ha sido autorizado.</p>";
         echo "<p>Ya puedes navegar en Internet.</p>";
         echo "<hr>";
-        echo "<small><a href='http://google.com'>Continuar navegando</a></small>";
+        echo "<small>Si no te redirige automáticamente, <a href='http://google.com'>haz clic aquí</a></small>";
         echo "</div>";
         
-        // Redireccionar automáticamente
-        echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 2000);</script>";
+        // Redireccionar automáticamente después de 3 segundos
+        echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 3000);</script>";
+
+    } catch (Exception $e) {
+        // Revertir transacción en caso de error
+        $conn->rollback();
+        echo "<h3>⚠️ Error al registrar: " . htmlspecialchars($e->getMessage()) . "</h3>";
+        echo "<a href='?client_mac=" . urlencode($mac) . "'>← Volver al formulario</a>";
     }
 
     $conn->close();
