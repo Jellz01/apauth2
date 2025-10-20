@@ -1,5 +1,7 @@
 <?php
-// Database configuration
+// -----------------------------
+// Database connection
+// -----------------------------
 $host = 'mysql_server';
 $db   = 'radius';
 $user = 'radius';
@@ -10,18 +12,23 @@ if ($conn->connect_error) {
     die("❌ Database connection failed: " . $conn->connect_error);
 }
 
-// Get MAC from Aruba redirect (URL parameter)
+// -----------------------------
+// Get MAC from Aruba redirect
+// -----------------------------
 $mac = isset($_GET['mac']) ? strtolower(trim($_GET['mac'])) : '';
 
+// -----------------------------
+// Handle form submission
+// -----------------------------
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $nombre = $_POST['nombre'];
-    $apellido = $_POST['apellido'];
-    $cedula = $_POST['cedula'];
-    $telefono = $_POST['telefono'];
-    $email = $_POST['email'];
-    $mac = strtolower(trim($_POST['mac']));
+    $nombre   = trim($_POST['nombre']);
+    $apellido = trim($_POST['apellido']);
+    $cedula   = trim($_POST['cedula']);
+    $telefono = trim($_POST['telefono']);
+    $email    = trim($_POST['email']);
+    $mac      = strtolower(trim($_POST['mac']));
 
-    // Avoid duplicates
+    // Check if MAC already registered
     $check = $conn->prepare("SELECT COUNT(*) FROM clients WHERE mac = ?");
     $check->bind_param("s", $mac);
     $check->execute();
@@ -30,51 +37,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $check->close();
 
     if ($exists == 0) {
-        // Insert client — enabled = 1 triggers automatic sync to radcheck
+        // Insert new client (enabled=1 triggers radcheck sync via trigger)
         $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
                                 VALUES (?, ?, ?, ?, ?, ?, 1)");
         $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac);
         if ($stmt->execute()) {
-            echo "<h3>✅ Registration successful! Your device is now authorized.</h3>";
+            echo "<h3>✅ Registro exitoso. Tu dispositivo ha sido autorizado.</h3>";
         } else {
-            echo "<h3>⚠️ Database error: " . $stmt->error . "</h3>";
+            echo "<h3>⚠️ Error al registrar: " . $stmt->error . "</h3>";
         }
         $stmt->close();
     } else {
-        echo "<h3>ℹ️ This device is already registered and authorized.</h3>";
+        echo "<h3>ℹ️ Este dispositivo ya está registrado y autorizado.</h3>";
     }
+
     $conn->close();
     exit;
 }
 ?>
-
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Public Wi-Fi Registration</title>
-</head>
-<body>
-  <h2>Register to Access Free Wi-Fi</h2>
-  <form method="POST">
-    <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac); ?>">
-
-    <label>Nombre:</label><br>
-    <input type="text" name="nombre" required><br><br>
-
-    <label>Apellido:</label><br>
-    <input type="text" name="apellido" required><br><br>
-
-    <label>Cédula:</label><br>
-    <input type="text" name="cedula" required><br><br>
-
-    <label>Teléfono:</label><br>
-    <input type="text" name="telefono" required><br><br>
-
-    <label>Correo electrónico:</label><br>
-    <input type="email" name="email" required><br><br>
-
-    <button type="submit">Registrar Dispositivo</button>
-  </form>
-</body>
-</html>
