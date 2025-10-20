@@ -1,198 +1,161 @@
 <?php
-// -----------------------------
-// Database connection
-// -----------------------------
-$host = 'mysql_server';
-$db   = 'radius';
-$user = 'radius';
-$pass = 'dalodbpass';
+// debug_headers.php
+// Shows client IPs, request headers, GET/POST params, raw body and searches for MAC-like values.
 
-$conn = new mysqli($host, $user, $pass, $db);
-if ($conn->connect_error) {
-    die("❌ Database connection failed: " . $conn->connect_error);
+// --- Helper: safely print arrays
+function pretty($v) {
+    return '<pre style="white-space:pre-wrap;word-break:break-word;">' . htmlspecialchars(print_r($v, true)) . '</pre>';
 }
 
-// -----------------------------
-// Get MAC from Aruba redirect
-// -----------------------------
-$mac = isset($_GET['client_mac']) ? strtolower(trim($_GET['client_mac'])) : '';
+// --- Collect candidate client IPs (trust but verify)
+$remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '(none)';
+$forwardedFor = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['HTTP_CLIENT_IP'] ?? null;
 
-// Limpiar la MAC (quitar guiones, dos puntos, espacios)
-$mac = str_replace([':', '-', ' ', '.'], '', $mac);
+// Normalize X-Forwarded-For (may contain comma list)
+if ($forwardedFor) {
+    // take first (original) and last (closest proxy) as examples
+    $xffList = array_map('trim', explode(',', $forwardedFor));
+    $xffFirst = $xffList[0] ?? null;
+    $xffLast  = end($xffList);
+} else {
+    $xffList = [];
+    $xffFirst = $xffLast = null;
+}
 
-// -----------------------------
-// Handle form submission
-// -----------------------------
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
+// --- All SERVER variables
+$serverVars = $_SERVER;
 
-    // Always use null coalescing + trim to avoid undefined-key warnings
-    $nombre   = trim($_POST['nombre']   ?? '');
-    $apellido = trim($_POST['apellido'] ?? '');
-    $cedula   = trim($_POST['cedula']   ?? '');
-    $telefono = trim($_POST['telefono'] ?? '');
-    $correo   = trim($_POST['correo']   ?? '');
-    $mac_post = strtolower(trim($_POST['mac'] ?? ''));
-    
-    // Usar la MAC del POST si existe, si no, la del GET
-    $mac = $mac_post !== '' ? str_replace([':', '-', ' ', '.'], '', $mac_post) : $mac;
-
-    // Validate required fields
-    if ($nombre === '' || $apellido === '' || $cedula === '' || $telefono === '' || $correo === '' || $mac === '') {
-        echo "<h3>⚠️ Faltan campos obligatorios. Intente nuevamente.</h3>";
-        echo "<a href='?client_mac=" . urlencode($mac) . "'>← Volver al formulario</a>";
-        exit;
-    }
-
-    // Validar formato de MAC (debe tener 12 caracteres hexadecimales)
-    if (!preg_match('/^[0-9a-f]{12}$/i', $mac)) {
-        echo "<h3>⚠️ Formato de MAC inválido: " . htmlspecialchars($mac) . "</h3>";
-        echo "<a href='?client_mac=" . urlencode($mac) . "'>← Volver al formulario</a>";
-        exit;
-    }
-
-    // Formatear MAC para FreeRADIUS (con dos puntos cada 2 caracteres)
-    $mac_formatted = implode(':', str_split($mac, 2));
-
-    // Check if MAC already registered
-    $check = $conn->prepare("SELECT enabled FROM clients WHERE mac = ? OR mac = ?");
-    $check->bind_param("ss", $mac, $mac_formatted);
-    $check->execute();
-    $check->bind_result($enabled);
-    $exists = $check->fetch();
-    $check->close();
-
-    if ($exists) {
-        // MAC ya existe
-        if ($enabled == 1) {
-            // Ya está habilitada
-            echo "<div style='text-align: center; padding: 50px; font-family: Arial;'>";
-            echo "<h2>ℹ️ Dispositivo ya registrado</h2>";
-            echo "<p>Este dispositivo (<code>$mac_formatted</code>) ya está autorizado.</p>";
-            echo "<p>Ya puedes navegar en Internet.</p>";
-            echo "<hr>";
-            echo "<small><a href='http://google.com'>Continuar navegando</a></small>";
-            echo "</div>";
-            echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 2000);</script>";
-        } else {
-            // Existe pero no está habilitada - activarla
-            $update = $conn->prepare("UPDATE clients SET enabled = 1 WHERE mac = ? OR mac = ?");
-            $update->bind_param("ss", $mac, $mac_formatted);
-            $update->execute();
-            $update->close();
-            
-            echo "<div style='text-align: center; padding: 50px; font-family: Arial;'>";
-            echo "<h2>✅ ¡Dispositivo activado!</h2>";
-            echo "<p>Tu dispositivo (<code>$mac_formatted</code>) ha sido habilitado.</p>";
-            echo "<p>Ya puedes navegar en Internet.</p>";
-            echo "<hr>";
-            echo "<small><a href='http://google.com'>Continuar navegando</a></small>";
-            echo "</div>";
-            echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 2000);</script>";
+// --- All headers (getallheaders exists on Apache/IIS; fallback for others)
+if (function_exists('getallheaders')) {
+    $headers = getallheaders();
+} else {
+    // fallback: build from $_SERVER
+    $headers = [];
+    foreach ($_SERVER as $k => $v) {
+        if (strpos($k, 'HTTP_') === 0) {
+            $name = str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($k, 5)))));
+            $headers[$name] = $v;
+        } elseif (in_array($k, ['CONTENT_TYPE', 'CONTENT_LENGTH'])) {
+            $headers[str_replace('_', '-', ucwords(strtolower($k)))] = $v;
         }
-        $conn->close();
-        exit;
     }
-
-    // MAC no existe - registrar nuevo usuario
-    $conn->begin_transaction();
-    
-    try {
-        // 1. Insertar en tabla clients con enabled = 1 (acceso inmediato)
-        $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-                                VALUES (?, ?, ?, ?, ?, ?, 1)");
-        $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac_formatted);
-        $stmt->execute();
-        $stmt->close();
-
-        // Confirmar transacción
-        $conn->commit();
-
-        echo "<div style='text-align: center; padding: 50px; font-family: Arial;'>";
-        echo "<h2>✅ ¡Registro exitoso!</h2>";
-        echo "<p>Bienvenido/a <strong>$nombre $apellido</strong></p>";
-        echo "<p>Tu dispositivo (<code>$mac_formatted</code>) ha sido autorizado.</p>";
-        echo "<p>Ya puedes navegar en Internet.</p>";
-        echo "<hr>";
-        echo "<small>Si no te redirige automáticamente, <a href='http://google.com'>haz clic aquí</a></small>";
-        echo "</div>";
-        
-        // Redireccionar automáticamente después de 3 segundos
-        echo "<script>setTimeout(function(){ window.location.href = 'http://google.com'; }, 3000);</script>";
-
-    } catch (Exception $e) {
-        // Revertir transacción en caso de error
-        $conn->rollback();
-        echo "<h3>⚠️ Error al registrar: " . htmlspecialchars($e->getMessage()) . "</h3>";
-        echo "<a href='?client_mac=" . urlencode($mac) . "'>← Volver al formulario</a>";
-    }
-
-    $conn->close();
-    exit;
 }
 
-// -----------------------------
-// Display registration form
-// -----------------------------
-?>
+// --- GET and POST
+$get = $_GET;
+$post = $_POST;
 
-<!DOCTYPE html>
-<html lang="es">
+// --- Raw request body (useful for JSON or forwarded query)
+$rawBody = file_get_contents('php://input');
+
+// --- Full request URI and query string
+$uri = ($_SERVER['REQUEST_URI'] ?? '(unknown)');
+$qs  = ($_SERVER['QUERY_STRING'] ?? '');
+
+// --- Search for MAC-like patterns in headers, GET, POST, and body
+$macPattern = '/(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}|[0-9A-Fa-f]{12}/';
+$found = [];
+
+// Helper to search arrays/strings
+function search_for_mac($source, $label, $pattern, &$found) {
+    if (is_array($source)) {
+        foreach ($source as $k => $v) {
+            if (is_string($v) && preg_match_all($pattern, $v, $m)) {
+                foreach ($m[0] as $mac) $found[] = ["where" => "$label.$k", "value" => $mac];
+            }
+        }
+    } elseif (is_string($source) && preg_match_all($pattern, $source, $m)) {
+        foreach ($m[0] as $mac) $found[] = ["where" => $label, "value" => $mac];
+    }
+}
+
+search_for_mac($headers, 'Header', $macPattern, $found);
+search_for_mac($get, 'GET', $macPattern, $found);
+search_for_mac($post, 'POST', $macPattern, $found);
+search_for_mac($rawBody, 'Body', $macPattern, $found);
+search_for_mac($qs, 'QueryString', $macPattern, $found);
+
+// --- Optionally log to file (uncomment to enable)
+// $logLine = sprintf("[%s] REMOTE=%s XFF=%s URI=%s FOUND=%s\n", date('c'), $remoteAddr, $forwardedFor, $uri, json_encode($found));
+// file_put_contents(__DIR__ . '/debug_headers.log', $logLine, FILE_APPEND);
+
+// --- Output
+?>
+<!doctype html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Registro - WiFi Público</title>
-<style>
-* { box-sizing: border-box; }
-body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 10px; }
-.top-image, .bottom-image { width: 100%; max-width: 400px; border-radius: 10px; }
-.form-container { background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.15); width: 100%; max-width: 400px; margin: 15px 0; }
-h2 { color: #333; text-align: center; margin-bottom: 20px; font-size: 1.4rem; }
-input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
-button { width: 100%; padding: 14px; background: #667eea; color: white; border: none; border-radius: 8px; font-size: 1.05rem; cursor: pointer; margin-top: 10px; transition: background 0.3s ease; }
-button:hover { background: #5568d3; }
-.mac-display { background: #f9f9f9; padding: 10px; border-radius: 8px; margin-top: 12px; font-size: 0.9rem; color: #333; text-align: center; word-wrap: break-word; display: none; }
-.error { background: #ffebee; color: #c62828; padding: 10px; border-radius: 8px; margin: 10px 0; text-align: center; font-size: 0.9rem; display: block; }
-@media (max-width: 480px) { .form-container { padding: 20px 15px; border-radius: 10px; } input, button { font-size: 1rem; } h2 { font-size: 1.3rem; } }
-</style>
+  <meta charset="utf-8">
+  <title>Debug: Request Info</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 20px; line-height:1.4; }
+    h1 { margin-bottom: 6px; }
+    .box { border:1px solid #ddd; padding:10px; margin-bottom:12px; border-radius:6px; background:#fafafa; }
+    .warn { color: #a33; font-weight:600; }
+  </style>
 </head>
 <body>
+  <h1>Request debug</h1>
 
-<img src="gonetlogo.png" alt="WiFi Banner" class="top-image">
+  <div class="box">
+    <strong>Client addresses</strong>
+    <div>REMOTE_ADDR: <code><?= htmlspecialchars($remoteAddr) ?></code></div>
+    <div>X-Forwarded-For / Client IP header: <code><?= htmlspecialchars($forwardedFor ?? '(none)') ?></code></div>
+    <div>First XFF (likely original client): <code><?= htmlspecialchars($xffFirst ?? '(none)') ?></code></div>
+    <div>Last XFF (closest proxy): <code><?= htmlspecialchars($xffLast ?? '(none)') ?></code></div>
+  </div>
 
-<div class="form-container">
-<h2>BIENVENIDOS</h2>
+  <div class="box">
+    <strong>Request line</strong>
+    <div>URI: <code><?= htmlspecialchars($uri) ?></code></div>
+    <div>Query string: <code><?= htmlspecialchars($qs) ?></code></div>
+    <div>Method: <code><?= htmlspecialchars($_SERVER['REQUEST_METHOD'] ?? '(unknown)') ?></code></div>
+  </div>
 
-<?php if(!empty($error)) echo "<div class='error'>$error</div>"; ?>
+  <div class="box">
+    <strong>Headers</strong>
+    <?= pretty($headers) ?>
+  </div>
 
-<form id="wifiForm" method="POST" action="">
-    <input type="text" id="nombre" name="nombre" placeholder="Nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
-    <input type="text" id="apellido" name="apellido" placeholder="Apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
-    <input type="text" id="cedula" name="cedula" placeholder="Cédula" required value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
-    <input type="tel" id="telefono" name="telefono" placeholder="Teléfono" required pattern="09[0-9]{8}" value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
-    <input type="email" id="correo" name="correo" placeholder="Correo electrónico" required value="<?php echo htmlspecialchars($_POST['correo'] ?? ''); ?>">
+  <div class="box">
+    <strong>GET parameters</strong>
+    <?= pretty($get) ?>
+  </div>
 
-    <!-- Hidden MAC (from AP) -->
-    <input type="hidden" name="mac" value="<?php echo htmlspecialchars($_GET['client_mac'] ?? ''); ?>">
+  <div class="box">
+    <strong>POST parameters</strong>
+    <?= pretty($post) ?>
+  </div>
 
-    <button type="submit">Registrarse</button>
-    <div class="mac-display" id="macDisplay"></div>
-</form>
-</div>
+  <div class="box">
+    <strong>Raw body</strong>
+    <pre style="white-space:pre-wrap;word-break:break-word;"><?= htmlspecialchars($rawBody ?: '(empty)') ?></pre>
+  </div>
 
-<img src="banner.png" alt="WiFi Footer" class="bottom-image">
+  <div class="box">
+    <strong>$_SERVER (selected)</strong>
+    <?= pretty(array_intersect_key($serverVars, array_flip([
+        'SERVER_NAME','SERVER_ADDR','SERVER_PROTOCOL','SERVER_PORT','REQUEST_METHOD',
+        'REMOTE_ADDR','REMOTE_PORT','HTTP_HOST','HTTP_USER_AGENT','HTTP_REFERER'
+    ]))) ?>
+  </div>
 
-<script>
-// Show the MAC on the form for debugging
-document.addEventListener("DOMContentLoaded", () => {
-    const params = new URLSearchParams(window.location.search);
-    const mac = params.get("client_mac") || "No MAC";
-    const macDisplay = document.getElementById("macDisplay");
-    if (mac !== "No MAC") {
-        macDisplay.style.display = "block";
-        macDisplay.textContent = "MAC: " + mac;
-    }
-});
-</script>
+  <div class="box">
+    <strong>MAC-like values found</strong>
+    <?php if (count($found) === 0): ?>
+      <div class="warn">No MAC-like pattern found in headers / GET / POST / body.</div>
+      <div>Common places APs put the MAC: query string param names like <code>mac</code>, <code>client_mac</code>, <code>callingstationid</code>, or in a header added by the gateway.</div>
+    <?php else: ?>
+      <?= pretty($found) ?>
+    <?php endif; ?>
+  </div>
 
+  <div class="box">
+    <strong>Notes</strong>
+    <ul>
+      <li>Browsers do <strong>not</strong> send the device MAC address in normal HTTP requests. If you see a MAC, it was added by the AP/gateway or proxy in the URL or a header.</li>
+      <li>If you want the AP to include MAC, look for WISPr or captive-portal settings that add the MAC as a query parameter when redirecting to the portal.</li>
+      <li>Be careful logging or exposing MAC addresses (privacy). Remove logs or secure them when not needed.</li>
+    </ul>
+  </div>
 </body>
 </html>
