@@ -68,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $rad->bind_param("s", $mac);
             if ($rad->execute()) {
-                echo "<script>alert('✅ Device registered successfully! You can now connect.'); window.location='success.html';</script>";
+                echo "<script>alert('✅ Device registered successfully! You can now connect.'); window.location='bienvenidos.html';</script>";
             } else {
                 echo "<div class='error'>Error inserting into radcheck: " . htmlspecialchars($rad->error) . "</div>";
             }
