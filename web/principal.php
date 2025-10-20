@@ -3,8 +3,8 @@
 
 // Database connection
 $host = "mysql_server";
-$user = "radius_user";
-$pass = "radius_pass";
+$user = "radius";
+$pass = "dalodbpass";
 $db   = "radius";
 
 $conn = new mysqli($host, $user, $pass, $db);
