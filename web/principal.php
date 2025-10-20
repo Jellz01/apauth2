@@ -94,6 +94,7 @@ input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; borde
 button { width: 100%; padding: 14px; background: #667eea; color: white; border: none; border-radius: 8px; font-size: 1.05rem; cursor: pointer; margin-top: 10px; transition: background 0.3s ease; }
 button:hover { background: #5568d3; }
 .error { background: #ffebee; color: #c62828; padding: 10px; border-radius: 8px; margin: 10px 0; text-align: center; font-size: 0.9rem; display: block; }
+.mac-display { background: #f9f9f9; padding: 10px; border-radius: 8px; margin-top: 12px; font-size: 0.9rem; color: #333; text-align: center; word-wrap: break-word; }
 @media (max-width: 480px) { .form-container { padding: 20px 15px; border-radius: 10px; } input, button { font-size: 1rem; } h2 { font-size: 1.3rem; } }
 </style>
 </head>
@@ -111,6 +112,13 @@ button:hover { background: #5568d3; }
             <input type="text" name="telefono" placeholder="Phone Number" required>
             <input type="email" name="email" placeholder="Email" required>
             <input type="hidden" name="mac" value="<?php echo $mac; ?>">
+
+            <!-- 👇 MAC shown above the register button -->
+            <?php if (!empty($mac)): ?>
+                <div class="mac-display">
+                    <strong>Device MAC:</strong><br><?php echo $mac; ?>
+                </div>
+            <?php endif; ?>
 
             <button type="submit">Register</button>
         </form>
