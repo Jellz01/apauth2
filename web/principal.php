@@ -2,7 +2,7 @@
 // register_client.php
 
 // Database connection
-$host = "localhost";
+$host = "mysql_server";
 $user = "radius_user";
 $pass = "radius_pass";
 $db   = "radius";
