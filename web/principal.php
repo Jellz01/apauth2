@@ -7,6 +7,10 @@ $db   = 'radius';
 $user = 'radius';
 $pass = 'dalodbpass';
 
+
+$radius_host = 'freeradius_server';
+$radius_port = 1812;
+
 $conn = mysqli_connect($host, $user, $pass, $db);
 if (!$conn) {
     die("Database connection failed: " . mysqli_connect_error());
