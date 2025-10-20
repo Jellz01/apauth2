@@ -15,18 +15,26 @@ if ($conn->connect_error) {
 // -----------------------------
 // Get MAC from Aruba redirect
 // -----------------------------
-$mac = isset($_GET['mac']) ? strtolower(trim($_GET['mac'])) : '';
+$mac = isset($_GET['client_mac']) ? strtolower(trim($_GET['client_mac'])) : '';
 
 // -----------------------------
 // Handle form submission
 // -----------------------------
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $nombre   = trim($_POST['nombre']);
-    $apellido = trim($_POST['apellido']);
-    $cedula   = trim($_POST['cedula']);
-    $telefono = trim($_POST['telefono']);
-    $email    = trim($_POST['email']);
-    $mac      = strtolower(trim($_POST['mac']));
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+    // Always use null coalescing + trim to avoid undefined-key warnings
+    $nombre   = trim($_POST['nombre']   ?? '');
+    $apellido = trim($_POST['apellido'] ?? '');
+    $cedula   = trim($_POST['cedula']   ?? '');
+    $telefono = trim($_POST['telefono'] ?? '');
+    $correo   = trim($_POST['correo']   ?? ''); // matches name="correo"
+    $mac      = strtolower(trim($_POST['mac']   ?? $mac));
+
+    // Validate required fields
+    if ($nombre === '' || $apellido === '' || $cedula === '' || $telefono === '' || $correo === '' || $mac === '') {
+        echo "<h3>⚠️ Faltan campos obligatorios. Intente nuevamente.</h3>";
+        exit;
+    }
 
     // Check if MAC already registered
     $check = $conn->prepare("SELECT COUNT(*) FROM clients WHERE mac = ?");
@@ -36,15 +44,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $check->fetch();
     $check->close();
 
-    if ($exists == 0) {
+    if ((int)$exists === 0) {
         // Insert new client (enabled=1 triggers radcheck sync via trigger)
         $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
                                 VALUES (?, ?, ?, ?, ?, ?, 1)");
-        $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac);
+        $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac);
         if ($stmt->execute()) {
             echo "<h3>✅ Registro exitoso. Tu dispositivo ha sido autorizado.</h3>";
         } else {
-            echo "<h3>⚠️ Error al registrar: " . $stmt->error . "</h3>";
+            echo "<h3>⚠️ Error al registrar: " . htmlspecialchars($stmt->error) . "</h3>";
         }
         $stmt->close();
     } else {

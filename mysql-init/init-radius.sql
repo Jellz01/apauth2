@@ -4,6 +4,9 @@
 
 USE radius;
 
+
+
+
 -- ================================
 -- 1. YOUR CLIENTS TABLE (Main table for web interface)
 -- ================================
