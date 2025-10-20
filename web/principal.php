@@ -122,7 +122,7 @@ button:hover { background: #5568d3; }
 <body>
 
     <!-- Top banner -->
-    <img src="top_banner.jpg" alt="Top Banner" class="top-image">
+    <img src="gonetlogo.png" alt="Top Banner" class="top-image">
 
     <div class="form-container">
         <h2>Register to Access Wi-Fi</h2>
@@ -162,7 +162,7 @@ button:hover { background: #5568d3; }
     </div>
 
     <!-- Bottom banner -->
-    <img src="bottom_banner.jpg" alt="Bottom Banner" class="bottom-image">
+    <img src="banner.png" alt="Bottom Banner" class="bottom-image">
 
 </body>
 </html>
