@@ -18,9 +18,13 @@ if ($conn->connect_error) {
 }
 
 // ----------------------------
-// 🧾 Get MAC from URL
+// 🧾 Get Parameters from URL
 // ----------------------------
 $mac = isset($_GET['mac']) ? htmlspecialchars($_GET['mac']) : '';
+$ip = isset($_GET['ip']) ? htmlspecialchars($_GET['ip']) : '';
+$url = isset($_GET['url']) ? htmlspecialchars($_GET['url']) : '';
+$ap_mac = isset($_GET['ap_mac']) ? htmlspecialchars($_GET['ap_mac']) : '';
+$essid = isset($_GET['essid']) ? htmlspecialchars($_GET['essid']) : '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ----------------------------
@@ -32,6 +36,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $telefono = $_POST['telefono'];
     $email    = $_POST['email'];
     $mac      = $_POST['mac']; // Hidden field
+    $ip       = $_POST['ip'];
+    $url      = $_POST['url'];
 
     // ----------------------------
     // 🕵️ Check if MAC already registered
@@ -46,6 +52,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($check->num_rows > 0) {
         echo "<script>alert('⚠️ This device is already registered.');</script>";
+        // Redirect back to AP with success
+        if (!empty($url)) {
+            header("Location: " . urldecode($url));
+            exit;
+        }
     } else {
         // ----------------------------
         // 🧩 Insert into clients table
@@ -68,7 +79,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $rad->bind_param("s", $mac);
             if ($rad->execute()) {
-                echo "<script>alert('✅ Device registered successfully! You can now connect.'); window.location='bienvenido.html';</script>";
+                // ----------------------------
+                // 🔄 Redirect back to Aruba AP (RAUTH)
+                // ----------------------------
+                if (!empty($url)) {
+                    // Aruba expects redirect to original URL after auth
+                    header("Location: " . urldecode($url));
+                    exit;
+                } else {
+                    echo "<script>alert('✅ Device registered successfully! You can now connect.'); window.location='bienvenido.html';</script>";
+                }
             } else {
                 echo "<div class='error'>Error inserting into radcheck: " . htmlspecialchars($rad->error) . "</div>";
             }
@@ -95,6 +115,7 @@ button { width: 100%; padding: 14px; background: #667eea; color: white; border: 
 button:hover { background: #5568d3; }
 .error { background: #ffebee; color: #c62828; padding: 10px; border-radius: 8px; margin: 10px 0; text-align: center; font-size: 0.9rem; display: block; }
 .mac-display { background: #f9f9f9; padding: 10px; border-radius: 8px; margin-top: 12px; font-size: 0.9rem; color: #333; text-align: center; word-wrap: break-word; }
+.info-display { background: #e3f2fd; padding: 8px; border-radius: 6px; margin: 6px 0; font-size: 0.85rem; color: #1565c0; text-align: center; }
 @media (max-width: 480px) { .form-container { padding: 20px 15px; border-radius: 10px; } input, button { font-size: 1rem; } h2 { font-size: 1.3rem; } }
 </style>
 </head>
@@ -111,12 +132,28 @@ button:hover { background: #5568d3; }
             <input type="text" name="cedula" placeholder="ID / Cedula" required>
             <input type="text" name="telefono" placeholder="Phone Number" required>
             <input type="email" name="email" placeholder="Email" required>
+            
+            <!-- Hidden fields for RAUTH -->
             <input type="hidden" name="mac" value="<?php echo $mac; ?>">
+            <input type="hidden" name="ip" value="<?php echo $ip; ?>">
+            <input type="hidden" name="url" value="<?php echo $url; ?>">
 
             <!-- 👇 MAC shown above the register button -->
             <?php if (!empty($mac)): ?>
                 <div class="mac-display">
                     <strong>Device MAC:</strong><br><?php echo $mac; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if (!empty($ip)): ?>
+                <div class="info-display">
+                    <strong>IP:</strong> <?php echo $ip; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if (!empty($essid)): ?>
+                <div class="info-display">
+                    <strong>Network:</strong> <?php echo $essid; ?>
                 </div>
             <?php endif; ?>
 
@@ -129,3 +166,18 @@ button:hover { background: #5568d3; }
 
 </body>
 </html>
+```
+
+## Key Changes:
+
+1. **Captures all Aruba AP parameters** from URL (`ip`, `url`, `ap_mac`, `essid`)
+2. **Stores URL in hidden field** to preserve redirect location
+3. **After successful registration**, redirects back to the original URL (RAUTH)
+4. **Shows additional info** (IP, network name) on the form
+
+## Your Aruba AP Config Should Be:
+```
+aaa authentication captive-portal "CP_PROFILE"
+    default-role "guest"
+    login-page "http://YOUR_SERVER_IP/register_client.php"
+    logout-page "http://YOUR_SERVER_IP/logout.html"

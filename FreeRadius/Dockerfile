@@ -23,7 +23,8 @@ RUN echo 'Acquire::Check-Valid-Until "false";\nAcquire::Check-Date "false";' \
         tzdata \
         ca-certificates \
         bash \
-        gettext-base && \
+        gettext-base \
+        net-tools && \
     rm -rf /var/lib/apt/lists/*
 
 # -------------------------------------------------------------
@@ -35,13 +36,7 @@ COPY clients.conf /etc/freeradius/3.0/clients.conf
 COPY insert_mac.sh /etc/freeradius/insert_mac.sh
 
 # -------------------------------------------------------------
-# ✅ Copy entrypoint script
-# -------------------------------------------------------------
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# -------------------------------------------------------------
-# ✅ Permissions
+# ✅ Set permissions
 # -------------------------------------------------------------
 RUN chown -R freerad:freerad /etc/freeradius && \
     chmod 640 /etc/freeradius/3.0/clients.conf && \
@@ -51,12 +46,15 @@ RUN chown -R freerad:freerad /etc/freeradius && \
     chmod +x /etc/freeradius/insert_mac.sh
 
 # -------------------------------------------------------------
-# ✅ Expose ports
+# ✅ Expose RADIUS ports (Auth + Accounting + CoA)
 # -------------------------------------------------------------
 EXPOSE 1812/udp
 EXPOSE 1813/udp
+EXPOSE 3799/udp
 
-# -------------------------------------------------------------
-# ✅ Start with entrypoint script
-# -------------------------------------------------------------
-ENTRYPOINT ["/entrypoint.sh"]
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["entrypoint.sh"]
+
+CMD ["freeradius", "-X"]
