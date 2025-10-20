@@ -13,11 +13,9 @@ listen {
 server default {
 
     authorize {
-        #
-        # Check SQL for known MACs
-        #
         sql
 
+        
         if ("%{sql:SELECT enabled FROM clients WHERE mac = '%{Calling-Station-Id}'}" == "1") {
             update control {
                 Auth-Type := Accept
@@ -25,16 +23,7 @@ server default {
             ok
         }
         else {
-            #
-            # If MAC not found in DB, reject (this triggers captive portal redirect)
-            #
-            if ("%{sql:SELECT COUNT(*) FROM clients WHERE mac = '%{Calling-Station-Id}'}" == "0") {
-                update control {
-                    Tmp-String-0 := "%{Calling-Station-Id}"
-                }
-                # Optional: call an exec script to log new MACs, otherwise remove
-                # exec
-            }
+            
             reject
         }
     }
