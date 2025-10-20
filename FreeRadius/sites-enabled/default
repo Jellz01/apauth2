@@ -1,3 +1,16 @@
+listen {
+    type = auth
+    ipaddr = *
+    port = 1812
+}
+
+listen {
+    type = acct
+    ipaddr = *
+    port = 1813
+}
+
+
 server default {
     authorize {
         sql
@@ -24,17 +37,7 @@ server default {
             ok
         }
     }
-    listen {
-    type = auth
-    ipaddr = *
-    port = 1812
-}
 
-listen {
-    type = acct
-    ipaddr = *
-    port = 1813
-}
 
 }
 
