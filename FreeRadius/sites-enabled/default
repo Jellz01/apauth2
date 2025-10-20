@@ -39,31 +39,3 @@ listen {
 }
 
 
-server default {
-    authorize {
-        sql
-
-        if ("%{sql:SELECT enabled FROM clients WHERE mac = '%{Calling-Station-Id}'}" == "1") {
-            update control {
-                Auth-Type := Accept
-            }
-            ok
-        }
-        else {
-            if ("%{sql:SELECT COUNT(*) FROM clients WHERE mac = '%{Calling-Station-Id}'}" == "0") {
-                update control {
-                    Tmp-String-0 := "%{Calling-Station-Id}"
-                }
-                exec
-            }
-            reject
-        }
-    }
-
-    authenticate {
-        Auth-Type Accept {
-            ok
-        }
-    }
-    
-}
