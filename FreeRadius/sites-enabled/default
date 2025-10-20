@@ -29,8 +29,10 @@ server default {
     }
 
     authenticate {
-        Auth-Type Accept {
-            ok
+        Auth-Type SQL {
+
+            sql
+            
         }
     }
 }
