@@ -1,21 +1,21 @@
 <?php
-// -----------------------------
-// PHP: Handle POST submission
-// -----------------------------
+// ============================================
+// Public WiFi Registration Portal
+// Author: Joseph Wellesley
+// ============================================
+
+// ---------- Database Connection ----------
 $host = 'mysql_server';
 $db   = 'radius';
 $user = 'radius';
 $pass = 'dalodbpass';
 
-
-$radius_host = 'freeradius_server';
-$radius_port = 1812;
-
 $conn = mysqli_connect($host, $user, $pass, $db);
 if (!$conn) {
-    die("Database connection failed: " . mysqli_connect_error());
+    die("❌ Database connection failed: " . mysqli_connect_error());
 }
 
+// ---------- Helper: Ecuadorian ID Validation ----------
 function validarCedulaEcuatoriana($cedula) {
     if (!preg_match('/^\d{10}$/', $cedula)) return false;
     $provincia = intval(substr($cedula, 0, 2));
@@ -35,6 +35,7 @@ function validarCedulaEcuatoriana($cedula) {
     return $verificador == $ultimoDigito;
 }
 
+// ---------- Handle Form Submission ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $nombre   = trim($_POST['nombre'] ?? '');
@@ -44,16 +45,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $correo   = trim($_POST['correo'] ?? '');
     $mac_from_form = trim($_POST['mac'] ?? '');
 
-    // If empty, give a default MAC (or leave as empty string if column allows it)
+    // Clean or default MAC
     if (empty($mac_from_form)) {
-        $mac_clean = '00:00:00:00:00:00'; // default placeholder
+        $mac_clean = '00:00:00:00:00:00'; // fallback
     } else {
-        // Clean MAC (remove :, -, .)
-        $mac_clean = strtolower(str_replace([':', '-', '.'], '', $mac_from_form));
+        $mac_clean = strtolower(str_replace([':', '-', '.', ' '], '', $mac_from_form));
     }
 
-
-    // Validate required fields
+    // ---------- Validate Fields ----------
     if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
         $error = "Todos los campos son obligatorios.";
     } elseif (!validarCedulaEcuatoriana($cedula)) {
@@ -61,21 +60,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!preg_match('/^09\d{8}$/', $telefono)) {
         $error = "Teléfono inválido.";
     } else {
-       
-        $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac) VALUES (?, ?, ?, ?, ?, ?)");
+        // ---------- Insert or Update MAC ----------
+        $sql = "
+        INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+        ON DUPLICATE KEY UPDATE
+            nombre = VALUES(nombre),
+            apellido = VALUES(apellido),
+            cedula = VALUES(cedula),
+            telefono = VALUES(telefono),
+            email = VALUES(email),
+            enabled = 1;
+        ";
+
+        $stmt = $conn->prepare($sql);
         if (!$stmt) {
-            die("DB prepare error: " . $conn->error);
+            die('DB prepare error: ' . $conn->error);
         }
+
         $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac_clean);
 
         if ($stmt->execute()) {
             $stmt->close();
             mysqli_close($conn);
+
+            // ✅ Redirect to success page
             header("Location: bienvenido.html?status=success&message=Registro completado");
             exit();
         } else {
-            $stmt->close();
-            mysqli_close($conn);
             die("DB execute error: " . $stmt->error);
         }
     }
@@ -88,7 +100,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Registro - WiFi Público</title>
 <style>
-/* === Your previous CSS here === */
 * { box-sizing: border-box; }
 body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 10px; }
 .top-image, .bottom-image { width: 100%; max-width: 400px; border-radius: 10px; }
@@ -115,10 +126,10 @@ button:hover { background: #5568d3; }
     <input type="text" id="nombre" name="nombre" placeholder="Nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
     <input type="text" id="apellido" name="apellido" placeholder="Apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
     <input type="text" id="cedula" name="cedula" placeholder="Cédula" required value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
-    <input type="tel" id="telefono" name="telefono" placeholder="Teléfono " required pattern="09[0-9]{8}" value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
+    <input type="tel" id="telefono" name="telefono" placeholder="Teléfono" required pattern="09[0-9]{8}" value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
     <input type="email" id="correo" name="correo" placeholder="Correo electrónico" required value="<?php echo htmlspecialchars($_POST['correo'] ?? ''); ?>">
 
-    <!-- Hidden MAC field from Aruba -->
+    <!-- Hidden MAC (from AP) -->
     <input type="hidden" name="mac" value="<?php echo htmlspecialchars($_GET['client_mac'] ?? ''); ?>">
 
     <button type="submit">Registrarse</button>
@@ -129,13 +140,10 @@ button:hover { background: #5568d3; }
 <img src="banner.png" alt="WiFi Footer" class="bottom-image">
 
 <script>
-// Display MAC, IP, AP info from URL
+// Show the MAC on the form for debugging
 document.addEventListener("DOMContentLoaded", () => {
     const params = new URLSearchParams(window.location.search);
     const mac = params.get("client_mac") || "No MAC";
-    const ip = params.get("ip") || "No IP";
-    const ap = params.get("ap") || "No AP MAC";
-
     const macDisplay = document.getElementById("macDisplay");
     if (mac !== "No MAC") {
         macDisplay.style.display = "block";
