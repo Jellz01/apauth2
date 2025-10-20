@@ -12,19 +12,16 @@ listen {
 
 server default {
     authorize {
-        # Add these before your SQL check
+        # Basic preprocessing
         preprocess
         
-        # For MAC auth, you might need to reformat the MAC
-        rewrite_calling_station_id
-        
+        # Query SQL to check if MAC is enabled
         sql
         
         if ("%{sql:SELECT enabled FROM clients WHERE mac = '%{Calling-Station-Id}'}" == "1") {
             update control {
                 Auth-Type := Accept
             }
-            ok
         }
         else {
             reject
@@ -32,17 +29,28 @@ server default {
     }
 
     authenticate {
-        # This section might be unnecessary if you're using Auth-Type := Accept
+        # This must match the Auth-Type you set in authorize
         Auth-Type Accept {
             ok
         }
+        
+        # If you want SQL auth as fallback
+        Auth-Type SQL {
+            sql
+        }
     }
 
-    # Add these sections
+    # Add post-auth section to handle both success and failure
     post-auth {
         sql
+        
+        Post-Auth-Type REJECT {
+            sql
+            attr_filter.access_reject
+        }
     }
 
+    # Add accounting section
     accounting {
         sql
     }
