@@ -11,18 +11,15 @@ USE radius;
 -- 1. YOUR CLIENTS TABLE (Main table for web interface)
 -- ================================
 CREATE TABLE IF NOT EXISTS clients (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  nombre VARCHAR(100),
-  apellido VARCHAR(100),
-  cedula VARCHAR(20),
-  telefono VARCHAR(20),
-  email VARCHAR(100),
-  mac VARCHAR(17) UNIQUE,
-  enabled TINYINT(1) NOT NULL DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_mac (mac),
-  INDEX idx_enabled (enabled)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(100),
+    apellido VARCHAR(100),
+    cedula VARCHAR(20),
+    telefono VARCHAR(20),
+    email VARCHAR(100),
+    mac VARCHAR(20) UNIQUE,
+    enabled TINYINT(1) DEFAULT 1
+);
 
 -- ================================
 -- 2. NAS TABLE (Your Access Points/Routers)
@@ -44,14 +41,12 @@ CREATE TABLE IF NOT EXISTS nas (
 -- FreeRADIUS reads this for authentication
 -- ================================
 CREATE TABLE IF NOT EXISTS radcheck (
-    id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-    username VARCHAR(64) NOT NULL DEFAULT '',
-    attribute VARCHAR(64) NOT NULL DEFAULT '',
-    op CHAR(2) NOT NULL DEFAULT '==',
-    value VARCHAR(253) NOT NULL DEFAULT '',
-    PRIMARY KEY (id),
-    KEY username (username(32))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(64),
+    attribute VARCHAR(64),
+    op CHAR(2),
+    value VARCHAR(253)
+);
 
 -- ================================
 -- OPTIONAL: Post-Auth Logging (see who tried to connect)
