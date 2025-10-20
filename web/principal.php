@@ -83,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // 🔄 Redirect back to Aruba AP (RAUTH)
                 // ----------------------------
                 if (!empty($url)) {
-                    // Aruba expects redirect to original URL after auth
+                    
                     header("Location: " . urldecode($url));
                     exit;
                 } else {
@@ -166,18 +166,4 @@ button:hover { background: #5568d3; }
 
 </body>
 </html>
-```
 
-## Key Changes:
-
-1. **Captures all Aruba AP parameters** from URL (`ip`, `url`, `ap_mac`, `essid`)
-2. **Stores URL in hidden field** to preserve redirect location
-3. **After successful registration**, redirects back to the original URL (RAUTH)
-4. **Shows additional info** (IP, network name) on the form
-
-## Your Aruba AP Config Should Be:
-```
-aaa authentication captive-portal "CP_PROFILE"
-    default-role "guest"
-    login-page "http://YOUR_SERVER_IP/register_client.php"
-    logout-page "http://YOUR_SERVER_IP/logout.html"

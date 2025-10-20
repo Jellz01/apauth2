@@ -1,142 +1,88 @@
+<?php
+// bienvenido.php
+
+// ----------------------------
+// 🔧 Configuration for CoA
+// ----------------------------
+$ap_ip = '192.168.0.9';   // Aruba AP IP
+$coa_port = 3799;          // CoA port (RFC 3576)
+$coa_secret = 'telecom';   // Must match your clients.conf coa secret
+
+// ----------------------------
+// 📥 Get MAC from URL
+// ----------------------------
+$mac = isset($_GET['mac']) ? trim($_GET['mac']) : '';
+$coa_sent = false;
+$coa_message = '';
+
+// ----------------------------
+// 📡 Send CoA if MAC exists
+// ----------------------------
+if (!empty($mac)) {
+    $mac = preg_replace('/[^A-Fa-f0-9:]/', '', $mac);
+
+    $attributes = "User-Name=$mac\nAcct-Session-Id=coa-reauth-" . time();
+    $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
+    file_put_contents($tmpFile, $attributes);
+
+    $command = sprintf(
+        'cat %s | radclient -x %s:%d coa %s 2>&1',
+        escapeshellarg($tmpFile),
+        escapeshellarg($ap_ip),
+        $coa_port,
+        escapeshellarg($coa_secret)
+    );
+    exec($command, $output, $return_var);
+    unlink($tmpFile);
+
+    $coa_sent = ($return_var === 0);
+    $coa_message = $coa_sent
+        ? '✅ CoA enviado exitosamente'
+        : '⚠️ Error enviando CoA: ' . implode("\n", $output);
+}
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Registro - WiFi Público</title>
+    <title>GoNet WiFi</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
         body {
+            margin: 0;
+            background-color: #ffffff;
             font-family: Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 10px;
-        }
-
-        .form-container {
-            background: white;
-            padding: 25px 20px;
-            border-radius: 12px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
-            width: 100%;
-            max-width: 400px;
-        }
-
-        h2 { 
-            color: #333; 
+            height: 100vh;
             text-align: center;
-            margin-bottom: 20px;
-            font-size: 1.4rem;
         }
-
-        input {
-            width: 100%;
-            padding: 12px;
-            margin: 8px 0;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            font-size: 1rem;
+        .logo {
+            width: 250px;
+            max-width: 80%;
+            margin-bottom: 30px;
         }
-
-        button {
-            width: 100%;
-            padding: 14px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.05rem;
-            cursor: pointer;
-            margin-top: 10px;
-            transition: background 0.3s ease;
-        }
-
-        button:hover {
-            background: #5568d3;
-        }
-
-        .mac-display {
-            background: #f9f9f9;
-            padding: 10px;
-            border-radius: 8px;
-            margin-top: 12px;
-            font-size: 0.9rem;
-            color: #333;
-            text-align: center;
-            word-wrap: break-word;
-        }
-
-        .error {
-            background: #ffebee;
-            color: #c62828;
-            padding: 10px;
-            border-radius: 8px;
-            margin: 10px 0;
-            text-align: center;
-            font-size: 0.9rem;
-        }
-
-        /* 📱 Mobile adjustments */
-        @media (max-width: 480px) {
-            .form-container {
-                padding: 20px 15px;
-                border-radius: 10px;
-            }
-            input, button {
-                font-size: 1rem;
-            }
-            h2 {
-                font-size: 1.3rem;
-            }
-        }
-
-
-
         
-        .textoBienvenidos{
-            color: white;
-            font-weight: 900;
-            font-size: 50px;
-
-        }
-
-        .imageGonet{
-            display:block;
-            position: relative;
-
+        .mac {
+            font-size: 0.9rem;
+            color: #555;
+            margin-top: 8px;
         }
     </style>
 </head>
 <body>
-   
-    <div class="bienvenidosContainer">
+    <img src="gonetlogo.png" alt="GoNet Logo" class="logo">
 
-        <h2 class="textoBienvenidos">BIENVENIDOS</h2>
-        <img src="gonetlogo.png" class="imageGonet">
-
-    </div>
-    <div class="mac-display" id="macDisplay">MAC: not found</div>
-
-    <script>
-document.addEventListener("DOMContentLoaded", () => {
-    const params = new URLSearchParams(window.location.search);
-    const mac = params.get("mac");
-    const macDisplay = document.getElementById("macDisplay");
-
-    if (mac && mac.trim() !== "") {
-        macDisplay.textContent = "MAC: " + mac;
-    } else {
-        macDisplay.textContent = "MAC: not found";
-    }
-});
-</script>
-
+    <?php if (!empty($mac)): ?>
+        <div class="coa-status">
+            <?= htmlspecialchars($coa_message) ?>
+            <div class="mac"><strong>MAC:</strong> <?= htmlspecialchars($mac) ?></div>
+        </div>
+    <?php else: ?>
+        <div class="coa-status" style="background:#fff3cd;color:#856404;">
+            ⚠️ No se detectó ninguna dirección MAC.
+        </div>
+    <?php endif; ?>
 </body>
 </html>
