@@ -61,7 +61,7 @@ done
 mkdir -p /var/log/freeradius
 chown -R freerad:freerad /var/log/freeradius
 
-# Debug mode (optional)
+# Debug mode
 if [ "${DEBUG}" = "true" ]; then
   echo "🐛 Debug mode enabled - starting FreeRADIUS in debug mode..."
   echo "📝 ALL requests and responses will be logged"
@@ -70,4 +70,17 @@ if [ "${DEBUG}" = "true" ]; then
   echo "════════════════════════════════════════════════════════════"
   echo "  FreeRADIUS Debug Mode Active"
   echo "  Waiting for RADIUS requests..."
-  echo "═══════════
+  echo "════════════════════════════════════════════════════════════"
+  echo ""
+  exec freeradius -X
+else
+  echo "▶️  Starting FreeRADIUS in normal mode with verbose logging..."
+  echo "💡 To see debug output, set DEBUG=true in docker-compose.yml"
+  echo ""
+  echo "════════════════════════════════════════════════════════════"
+  echo "  FreeRADIUS Started"
+  echo "  Logs: docker logs -f freeradius"
+  echo "════════════════════════════════════════════════════════════"
+  echo ""
+  exec freeradius -f -l stdout
+fi
