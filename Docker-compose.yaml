@@ -30,6 +30,7 @@ services:
       mysql:
         condition: service_healthy
     environment:
+      DEBUG: "true"
       MYSQL_HOST: mysql_server
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
