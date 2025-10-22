@@ -16,11 +16,7 @@ services:
       - ./mysql-init:/docker-entrypoint-initdb.d   
     networks:
       - dalonet
-    healthcheck:
-      test: ["CMD", "mysql", "-u", "root", "-p$MYSQL_ROOT_PASSWORD", "-e", "SELECT 1;"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+   
 
   freeradius:
     build: ./FreeRadius
