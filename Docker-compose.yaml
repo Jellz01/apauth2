@@ -13,12 +13,11 @@ services:
     ports:
       - "3306:3306"
     volumes:  
-      - ./mysql-init:/docker-entrypoint-initdb.d
-      
+      - ./mysql-init:/docker-entrypoint-initdb.d   
     networks:
       - dalonet
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
+      test: ["CMD", "mysql", "-u", "root", "-p$MYSQL_ROOT_PASSWORD", "-e", "SELECT 1;"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,7 +34,7 @@ services:
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
       MYSQL_DATABASE: radius
-      #DEBUG: true
+      
     ports:
       - "1812:1812/udp"
       - "1813:1813/udp"
