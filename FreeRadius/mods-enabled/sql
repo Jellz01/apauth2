@@ -1,14 +1,25 @@
 sql {
-    driver = "rlm_sql_mysql"
-    dialect = "mysql"
-    
-   server = "mysql_server"
-    login = "radius"
-    password = "dalodbpass"
-    radius_db = "radius"
+  driver      = "rlm_sql_mysql"
+  dialect     = "mysql"
 
-    
-    read_clients = yes
-    connect_failure_retry_delay = 60
-  
+  server      = "${MYSQL_HOST}"
+  port        = 3306
+  login       = "${MYSQL_USER}"
+  password    = "${MYSQL_PASSWORD}"
+  radius_db   = "${MYSQL_DATABASE}"
+
+  sql_user_name   = "%{User-Name}"   # preserve ':' in MACs
+  safe_characters = "@abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_/: "
+
+  pool {
+    start        = 1
+    min          = 1
+    max          = 5
+    spare        = 1
+    uses         = 0
+    lifetime     = 0
+    idle_timeout = 60
+  }
+
+  $INCLUDE ${modconfdir}/sql/main/${dialect}/queries.conf   # CRITICAL
 }

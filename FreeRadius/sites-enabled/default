@@ -1,66 +1,81 @@
 listen {
-    type = auth
-    ipaddr = *
-    port = 1812
+  type = auth
+  ipaddr = *
+  port = 1812
+  limit {
+    max_connections = 16
+    lifetime = 0
+    idle_timeout = 30
+  }
 }
 
 listen {
-    type = acct
-    ipaddr = *
-    port = 1813
+  type = acct
+  ipaddr = *
+  port = 1813
+  limit {
+    max_connections = 16
+    lifetime = 0
+    idle_timeout = 30
+  }
 }
 
-server default {
-    authorize {
-        preprocess
-        sql
-        
-        # Check if MAC exists and is enabled in database
-        if ("%{sql:SELECT COUNT(*) FROM clients WHERE mac = '%{Calling-Station-Id}' AND enabled = 1}" == "1") {
-            # MAC is registered and enabled - grant full access
-            update reply {
-                Reply-Message := "Access granted"
-            }
-            update control {
-                Auth-Type := Accept
-            }
-        }
-        elsif ("%{sql:SELECT COUNT(*) FROM clients WHERE mac = '%{Calling-Station-Id}'}" == "1") {
-            # MAC exists but not enabled - redirect to waiting page
-            update reply {
-                Reply-Message := "Registration pending approval"
-                WISPr-Redirection-URL := "http://your-portal.com/pending"
-            }
-            reject
-        }
-        else {
-            # MAC not registered - redirect to registration form
-            update reply {
-                Reply-Message := "Please register"
-                WISPr-Redirection-URL := "http://your-portal.com/register"
-            }
-            reject
-        }
-    }
+authorize {
+  #filter_username
+  preprocess
+  mac-normalize
+  sql
+    
+    
+    pap
+}
 
-    authenticate {
-        Auth-Type Accept {
-            ok
-        }
-    }
+authenticate {
+  Auth-Type PAP {
+    pap
+  }
+  Auth-Type CHAP {
+    chap
+  }
+  Auth-Type MS-CHAP {
+    mschap
+  }
+  Auth-Type Accept {
+    ok
+  }
+}
 
-    post-auth {
-        sql
-        
-        Post-Auth-Type REJECT {
-            sql
-            
-            # Log rejected attempts
-            exec
-        }
-    }
+preacct {
+  preprocess
+  acct_unique
+  suffix
+}
 
-    accounting {
-        sql
-    }
+accounting {
+  detail
+  sql
+  exec
+  attr_filter.accounting_response
+}
+
+session {
+  sql
+}
+
+post-auth {
+  sql
+  exec
+
+  Post-Auth-Type REJECT {
+    attr_filter.access_reject
+    eap
+    remove_reply_message_if_eap
+  }
+}
+
+pre-proxy {
+}
+
+post-proxy {
+  eap
 }

@@ -4,9 +4,6 @@
 
 USE radius;
 
-
-
-
 -- ================================
 -- 1. YOUR CLIENTS TABLE (Main table for web interface)
 -- ================================
@@ -49,7 +46,7 @@ CREATE TABLE IF NOT EXISTS radcheck (
 );
 
 -- ================================
--- OPTIONAL: Post-Auth Logging (see who tried to connect)
+-- 4. POST-AUTHENTICATION LOGGING (optional)
 -- ================================
 CREATE TABLE IF NOT EXISTS radpostauth (
     id INT(11) NOT NULL AUTO_INCREMENT,
@@ -63,44 +60,58 @@ CREATE TABLE IF NOT EXISTS radpostauth (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ================================
--- AUTO-SYNC: clients → radcheck
+-- 5. AUTO-SYNC: clients → radcheck
 -- ================================
+
 DELIMITER $$
 
+-- Trigger to sync clients into radcheck when a new client is added
 DROP TRIGGER IF EXISTS sync_client_insert$$
 CREATE TRIGGER sync_client_insert
 AFTER INSERT ON clients
 FOR EACH ROW
 BEGIN
     IF NEW.enabled = 1 AND NEW.mac IS NOT NULL THEN
+        -- Insert into radcheck: MAC as username, Cleartext-Password as MAC (not checked), and Auth-Type as cedula
         INSERT INTO radcheck (username, attribute, op, value)
-        VALUES (NEW.mac, 'Cleartext-Password', ':=', NEW.mac)
-        ON DUPLICATE KEY UPDATE value = NEW.mac;
+        VALUES 
+        (NEW.mac, 'Cleartext-Password', ':=', NEW.mac),   -- MAC address as the password (not checked)
+        (NEW.mac, 'Auth-Type', ':=', NEW.cedula)           -- cedula as Auth-Type
+        ON DUPLICATE KEY UPDATE value = NEW.mac;           -- Update if already exists
     END IF;
 END$$
 
+-- Trigger to sync clients into radcheck when a client is updated
 DROP TRIGGER IF EXISTS sync_client_update$$
 CREATE TRIGGER sync_client_update
 AFTER UPDATE ON clients
 FOR EACH ROW
 BEGIN
     IF NEW.enabled = 1 AND NEW.mac IS NOT NULL THEN
+        -- Insert into radcheck: MAC as username, Cleartext-Password as MAC (not checked), and Auth-Type as cedula
         INSERT INTO radcheck (username, attribute, op, value)
-        VALUES (NEW.mac, 'Cleartext-Password', ':=', NEW.mac)
-        ON DUPLICATE KEY UPDATE value = NEW.mac;
+        VALUES 
+        (NEW.mac, 'Cleartext-Password', ':=', NEW.mac),   -- MAC address as the password (not checked)
+        (NEW.mac, 'Auth-Type', ':=', NEW.cedula)           -- cedula as Auth-Type
+        ON DUPLICATE KEY UPDATE value = NEW.mac;           -- Update if already exists
     ELSEIF NEW.enabled = 0 AND OLD.mac IS NOT NULL THEN
+        -- If client is disabled, remove their radcheck entry
         DELETE FROM radcheck WHERE username = OLD.mac;
     END IF;
     
     IF NEW.mac != OLD.mac AND OLD.mac IS NOT NULL THEN
+        -- If MAC address changes, update radcheck accordingly
         DELETE FROM radcheck WHERE username = OLD.mac;
         IF NEW.enabled = 1 AND NEW.mac IS NOT NULL THEN
             INSERT INTO radcheck (username, attribute, op, value)
-            VALUES (NEW.mac, 'Cleartext-Password', ':=', NEW.mac);
+            VALUES 
+            (NEW.mac, 'Cleartext-Password', ':=', NEW.mac),
+            (NEW.mac, 'Auth-Type', ':=', NEW.cedula);
         END IF;
     END IF;
 END$$
 
+-- Trigger to sync clients into radcheck when a client is deleted
 DROP TRIGGER IF EXISTS sync_client_delete$$
 CREATE TRIGGER sync_client_delete
 AFTER DELETE ON clients
@@ -114,26 +125,29 @@ END$$
 DELIMITER ;
 
 -- ================================
--- SAMPLE DATA
+-- SAMPLE DATA (example for testing)
 -- ================================
 
 -- Add your Access Point(s)
--- Replace IP and secret with your actual AP
-INSERT INTO nas (nasname, shortname, secret, description) VALUES
-('192.168.1.1', 'AP-Main', 'testing123', 'Main Access Point'),
-('127.0.0.1', 'localhost', 'testing123', 'Testing')
+-- Replace IP and secret with your actual AP details
+-- Insert your NAS devices with their respective IP addresses and the secret 'telecom'
+INSERT INTO nas (nasname, shortname, type, secret, description) VALUES
+('192.168.0.9', 'Main-Access-Point', 'access_point', 'telecom', 'Main access point in the office'),
+('172.18.0.4', 'localhost', 'access_point', 'telecom', 'Testing access point on localhost')
 ON DUPLICATE KEY UPDATE nasname=nasname;
 
--- Add test clients
+
+-- Add test clients (example data)
 INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled) VALUES
 ('Juan', 'Pérez', '0102030405', '0991234567', 'juan@example.com', 'aa:bb:cc:dd:ee:ff', 1),
-('María', 'González', '0506070809', '0987654321', 'maria@example.com', '00:11:22:33:44:55', 0)
+('María', 'w', '0506070809', '0987654321', 'maria@example.com', '00:11:22:33:44:55', 0)
 ON DUPLICATE KEY UPDATE nombre=nombre;
 
 -- ================================
--- VERIFY
+-- VERIFY: Check status
 -- ================================
 SELECT '✅ Schema created!' as status;
 SELECT COUNT(*) as total_clients, SUM(enabled) as enabled_clients FROM clients;
 SELECT COUNT(*) as authorized_macs FROM radcheck;
 SELECT * FROM nas;
+

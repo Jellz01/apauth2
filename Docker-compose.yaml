@@ -12,10 +12,8 @@ services:
       MYSQL_PASSWORD: dalodbpass
     ports:
       - "3306:3306"
-    volumes:
-     
+    volumes:  
       - ./mysql-init:/docker-entrypoint-initdb.d
-      
       - ./radius-mysql:/var/lib/mysql
     networks:
       - dalonet
@@ -27,8 +25,8 @@ services:
 
   freeradius:
     build: ./FreeRadius
+    restart: "no"
     container_name: freeradius_server
-    restart: always
     depends_on:
       mysql:
         condition: service_healthy
@@ -37,12 +35,14 @@ services:
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
       MYSQL_DATABASE: radius
+      DEBUG: true
     ports:
       - "1812:1812/udp"
       - "1813:1813/udp"
       - "3799:3799/udp"
     networks:
       - dalonet
+    
 
   php:
     build: ./web

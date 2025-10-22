@@ -1,22 +1,36 @@
 #!/bin/bash
 set -e
 
-echo '🔍 Checking environment variables...'
-printenv | grep MYSQL || echo '❌ No MYSQL variables found'
+echo " Starting FreeRADIUS entrypoint..."
 
-echo '🔧 Applying envsubst to SQL config...'
-if [ -f /etc/freeradius/3.0/mods-enabled/sql ]; then
-    envsubst < /etc/freeradius/3.0/mods-enabled/sql > /tmp/sql.tmp
-    mv /tmp/sql.tmp /etc/freeradius/3.0/mods-enabled/sql
-    chown freerad:freerad /etc/freeradius/3.0/mods-enabled/sql
-    chmod 640 /etc/freeradius/3.0/mods-enabled/sql
-    echo '✅ SQL config updated with environment variables'
-    echo '📄 SQL config contents:'
-    cat /etc/freeradius/3.0/mods-enabled/sql
+# Wait for MySQL to be ready
+echo " Waiting for MySQL to be ready..."
+until mysql -h"${MYSQL_HOST}" -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; do
+  echo "   MySQL is unavailable - sleeping"
+  sleep 2
+done
+echo " MySQL is ready!"
+
+# Substitute environment variables in SQL config
+echo " Configuring SQL module with environment variables..."
+envsubst < /etc/freeradius/3.0/mods-enabled/sql > /tmp/sql.tmp
+mv /tmp/sql.tmp /etc/freeradius/3.0/mods-enabled/sql
+chown freerad:freerad /etc/freeradius/3.0/mods-enabled/sql
+chmod 640 /etc/freeradius/3.0/mods-enabled/sql
+
+# Test database connection
+echo " Testing database connection..."
+mysql -h"${MYSQL_HOST}" -u"${MYSQL_USER}" -p"${MYSQL_PASSWORD}" "${MYSQL_DATABASE}" -e "SHOW TABLES;" || {
+  echo " Database connection failed!"
+  exit 1
+}
+echo " Database connection successful!"
+
+# Debug mode (optional)
+if [ "${DEBUG}" = "true" ]; then
+  echo " Debug mode enabled - starting FreeRADIUS in debug mode..."
+  exec freeradius -X
 else
-    echo '⚠️  SQL config not found at /etc/freeradius/3.0/mods-enabled/sql'
-    exit 1
+  echo " Starting FreeRADIUS in normal mode..."
+  exec freeradius -f
 fi
-
-echo '🚀 Starting FreeRADIUS in foreground mode...'
-exec su -s /bin/bash freerad -c "/usr/sbin/freeradius -f -l stdout -X"
