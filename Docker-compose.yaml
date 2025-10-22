@@ -35,7 +35,7 @@ services:
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
       MYSQL_DATABASE: radius
-      DEBUG: true
+      #DEBUG: true
     ports:
       - "1812:1812/udp"
       - "1813:1813/udp"
