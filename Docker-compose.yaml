@@ -14,7 +14,7 @@ services:
       - "3306:3306"
     volumes:  
       - ./mysql-init:/docker-entrypoint-initdb.d
-      - ./radius-mysql:/var/lib/mysql
+      
     networks:
       - dalonet
     healthcheck:
