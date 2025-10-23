@@ -4,9 +4,9 @@
 // ----------------------------
 // 🔧 Database Configuration
 // ----------------------------
-$host = "mysql_server";   // Change to 127.0.0.1 if not using Docker
+$host = "mysql";   // Change to 127.0.0.1 if not using Docker
 $user = "radius";
-$pass = "dalodbpass";
+$pass = "radpass";
 $db   = "radius";
 
 // ----------------------------

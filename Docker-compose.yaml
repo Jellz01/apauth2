@@ -3,47 +3,44 @@ version: "3.9"
 services:
   mysql:
     image: mysql:8.0.42
-    container_name: mysql_server
-    restart: always
+    container_name: mysql
+    command: ["--default-authentication-plugin=mysql_native_password"]
     environment:
-      DEBUG: "true"
-      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_ROOT_PASSWORD: radius
       MYSQL_DATABASE: radius
       MYSQL_USER: radius
-      MYSQL_PASSWORD: dalodbpass
-      MYSQL_HOST: mysql_server 
-    ports:
-      - "3306:3306"
-    volumes:  
-      - ./mysql-init:/docker-entrypoint-initdb.d   
-    networks:
-      - dalonet
+      MYSQL_PASSWORD: radpass
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/radius-lf.sql:/docker-entrypoint-initdb.d/1-radius.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pradius"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: always
+    networks:
+      - backend
 
   freeradius:
-    build: ./FreeRadius
-    restart: "no"
-    container_name: freeradius_server
-    depends_on:
-      mysql:
-        condition: service_healthy
+    image: 2stacks/freeradius
+    container_name: freeradius
     environment:
-      MYSQL_HOST: mysql_server
-      MYSQL_USER: radius
-      MYSQL_PASSWORD: dalodbpass
-      MYSQL_DATABASE: radius
+      DB_HOST: mysql
+      DB_NAME: radius
+      DB_USER: radius
+      DB_PASS: radpass         # ← match MySQL user password
+      RAD_DEBUG: "yes"
+      RAD_CLIENTS: 192.198.0.9
+      RADIUS_KEY: telecom 
       
+    # uncomment if you need to reach RADIUS from the host:
     ports:
-      - "1812:1812/udp"
-      - "1813:1813/udp"
-      - "3799:3799/udp"
+       - "1812:1812/udp"
+       - "1813:1813/udp"
+    restart: always
     networks:
-      - dalonet
-    
+      - backend
 
   php:
     build: ./web
@@ -56,13 +53,15 @@ services:
     volumes:
       - ./web:/var/www/html
     environment:
-      MYSQL_HOST: mysql_server
+      MYSQL_HOST: mysql
       MYSQL_USER: radius
-      MYSQL_PASSWORD: dalodbpass
+      MYSQL_PASSWORD: radpass  
       MYSQL_DATABASE: radius
     networks:
-      - dalonet
+      - backend
 
 networks:
-  dalonet:
-    driver: bridge
+  backend: {}
+
+volumes:
+  mysql_data:

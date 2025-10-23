@@ -1,60 +1,40 @@
-FROM ubuntu:22.04
+FROM alpine:3.13.1
 
-ENV DEBIAN_FRONTEND=noninteractive
+MAINTAINER 2stacks <2stacks@2stacks.net>
 
-# Set timezone
-RUN ln -fs /usr/share/zoneinfo/UTC /etc/localtime
+# Use docker build --pull -t 2stacks/freeradius .
 
+# Image details
+LABEL net.2stacks.name="2stacks" \
+      net.2stacks.license="MIT" \
+      net.2stacks.description="Dockerfile for autobuilds" \
+      net.2stacks.url="http://www.2stacks.net" \
+      net.2stacks.vcs-type="Git" \
+      net.2stacks.version="1.5.1" \
+      net.2stacks.radius.version="3.0.20-r1"
 
-RUN echo 'Acquire::Check-Valid-Until "false";\nAcquire::Check-Date "false";' \
-      > /etc/apt/apt.conf.d/99allow-future && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        freeradius \
-        freeradius-config \
-        freeradius-mysql \
-        freeradius-utils \
-        mysql-client \
-        tzdata \
-        ca-certificates \
-        bash \
-        gettext-base \
-        net-tools && \
-    rm -rf /var/lib/apt/lists/*
-
-# Create directories
-RUN mkdir -p /etc/freeradius/3.0/sites-available \
-    /etc/freeradius/3.0/sites-enabled \
-    /etc/freeradius/3.0/mods-available \
-    /etc/freeradius/3.0/mods-enabled \
-    /etc/freeradius/3.0/certs
-
-
-
-
-# Copy configuration files
-COPY radiusd.conf /etc/freeradius/3.0/
-COPY clients.conf /etc/freeradius/3.0/
-COPY sites-enabled/ /etc/freeradius/3.0/sites-available/
-COPY mods-enabled/ /etc/freeradius/3.0/mods-available/
-
-
-# Enable sites and modules
-RUN ln -sf /etc/freeradius/3.0/sites-available/default /etc/freeradius/3.0/sites-enabled/ \
-    && ln -sf /etc/freeradius/3.0/sites-available/inner-tunnel /etc/freeradius/3.0/sites-enabled/ \
-    && ln -sf /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabled/ \
-    && ln -sf /etc/freeradius/3.0/mods-available/eap /etc/freeradius/3.0/mods-enabled/
-
-# Set permissions
-RUN chown -R freerad:freerad /etc/freeradius/3.0/ \
-    && chmod -R 644 /etc/freeradius/3.0/*.conf \
-    && chmod 755 /etc/freeradius/3.0/sites-available/ \
-    && chmod 755 /etc/freeradius/3.0/mods-available/ 
-
-# Copy startup script
-COPY scripts/start-radius.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/start-radius.sh
+RUN apk --update add freeradius freeradius-mysql freeradius-eap openssl
 
 EXPOSE 1812/udp 1813/udp
 
-CMD ["/usr/local/bin/start-radius.sh"]
+ENV DB_HOST=localhost
+ENV DB_PORT=3306
+ENV DB_USER=radius
+ENV DB_PASS=radpass
+ENV DB_NAME=radius
+ENV RADIUS_KEY=testing123
+ENV RAD_CLIENTS=10.0.0.0/24
+ENV RAD_DEBUG=no
+
+ADD --chown=root:radius ./etc/raddb/ /etc/raddb
+RUN /etc/raddb/certs/bootstrap && \
+    chown -R root:radius /etc/raddb/certs && \
+    chmod 640 /etc/raddb/certs/*.pem
+
+
+ADD ./scripts/start.sh /start.sh
+ADD ./scripts/wait-for.sh /wait-for.sh
+
+RUN chmod +x /start.sh wait-for.sh
+
+CMD ["/start.sh"]
