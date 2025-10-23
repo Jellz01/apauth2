@@ -1,4 +1,38 @@
+
+
 #
+# MAC Authentication entries - ADD THESE AT THE TOP
+#
+
+# Default entry for any MAC address - accepts all MACs
+DEFAULT User-Name =~ /^([0-9A-Fa-f]{2}[:-]?){5}([0-9A-Fa-f]{2})$/, Auth-Type := Accept
+    Reply-Message = "MAC Authentication Successful"
+
+# Specific MAC addresses with custom responses (optional)
+"001122334455"    Auth-Type := Accept
+    Reply-Message := "Welcome, device 00:11:22:33:44:55"
+
+"AABBCCDDEEFF"    Auth-Type := Accept  
+    Reply-Message := "Welcome, device AA:BB:CC:DD:EE:FF"
+
+"112233445566"    Auth-Type := Accept
+    Reply-Message := "Welcome, device 11:22:33:44:55:66"
+
+#########################################################
+# You should add test accounts to the TOP of this file! #
+# See the example user "bob" above.                     #
+#########################################################
+
+#
+# Deny access for a specific user.  Note that this entry MUST
+# be before any other 'Auth-Type' attribute which results in the user
+# being authenticated.
+#
+# Note that there is NO 'Fall-Through' attribute, so the user will not
+# be given any additional resources.
+#
+#lameuser	Auth-Type := Reject
+#		Reply-Message = "Your account has been disabled."
 # 	Configuration file for the rlm_files module.
 # 	Please see rlm_files(5) manpage for more information.
 #

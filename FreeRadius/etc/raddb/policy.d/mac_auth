@@ -1,0 +1,9 @@
+policy normalize_mac {
+    # Normalize MAC address format (remove separators)
+    if (&User-Name =~ /^([0-9A-Fa-f]{2})[:-]([0-9A-Fa-f]{2})[:-]([0-9A-Fa-f]{2})[:-]([0-9A-Fa-f]{2})[:-]([0-9A-Fa-f]{2})[:-]([0-9A-Fa-f]{2})$/ ) {
+        update request {
+            &User-Name := "%{1}%{2}%{3}%{4}%{5}%{6}"
+        }
+        updated
+    }
+}
