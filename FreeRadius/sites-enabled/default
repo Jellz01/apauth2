@@ -1,81 +1,122 @@
-listen {
-  type = auth
-  ipaddr = *
-  port = 1812
-  limit {
-    max_connections = 16
-    lifetime = 0
-    idle_timeout = 30
-  }
-}
+server default {
+    listen {
+        type = auth
+        ipaddr = *
+        port = 1812
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
 
-listen {
-  type = acct
-  ipaddr = *
-  port = 1813
-  limit {
-    max_connections = 16
-    lifetime = 0
-    idle_timeout = 30
-  }
-}
+    listen {
+        ipaddr = *
+        port = 1813
+        type = acct
+        limit {
+            max_connections = 16
+            lifetime = 0
+            idle_timeout = 30
+        }
+    }
 
-authorize {
-  #filter_username
-  preprocess
-  mac-normalize
-  sql
-    
-    
-    pap
-}
+    authorize {
+        filter_username
+        preprocess
+        auth_log
+        suffix
+        eap {
+            ok = return
+        }
+        expiration
+        logintime
+        
+        # MAC Authentication - Check if user exists in radcheck with Auth-Type := Accept
+        sql
+        
+        # If SQL found Auth-Type := Accept for this MAC, accept immediately
+        if (ok && control:Auth-Type == Accept) {
+            updatedetail
+        }
+        
+        pap
+        mschap
+        digest
+        files
+        
+        if (ok || updated) {
+            update control {
+                Auth-Type := Accept
+            }
+        }
+    }
 
-authenticate {
-  Auth-Type PAP {
-    pap
-  }
-  Auth-Type CHAP {
-    chap
-  }
-  Auth-Type MS-CHAP {
-    mschap
-  }
-  Auth-Type Accept {
-    ok
-  }
-}
+    authenticate {
+        # For MAC authentication with Auth-Type := Accept
+        Auth-Type Accept {
+            # Log the successful MAC auth
+            update log {
+                &Module-Failure-Message += "MAC Authentication successful for %{User-Name}"
+            }
+            # No additional authentication needed for MAC addresses
+            noop
+        }
+        
+        Auth-Type PAP {
+            pap
+        }
+        Auth-Type CHAP {
+            chap
+        }
+        Auth-Type MS-CHAP {
+            mschap
+        }
+        Auth-Type Digest {
+            digest
+        }
+        
+        eap
+    }
 
-preacct {
-  preprocess
-  acct_unique
-  suffix
-}
+    preacct {
+        preprocess
+        acct_unique
+        suffix
+        files
+    }
 
-accounting {
-  detail
-  sql
-  exec
-  attr_filter.accounting_response
-}
+    accounting {
+        detail
+        unix
+        radutmp
+        sql
+        exec
+        attr_filter.accounting_response
+    }
 
-session {
-  sql
-}
+    session {
+        radutmp
+        sql
+    }
 
-post-auth {
-  sql
-  exec
-
-  Post-Auth-Type REJECT {
-    attr_filter.access_reject
-    eap
-    remove_reply_message_if_eap
-  }
-}
-
-pre-proxy {
-}
-
-post-proxy {
-  eap
+    post-auth {
+        # Log successful authentication
+        if (ok) {
+            update {
+                &reply: += {
+                    Reply-Message = "Authentication successful"
+                }
+            }
+        }
+        sql
+        exec
+        remove_reply_message_if_eap
+        Post-Auth-Type REJECT {
+            attr_filter.access_reject
+            eap
+            remove_reply_message_if_eap
+        }
+        radutmp
+    }
 }

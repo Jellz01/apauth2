@@ -1,0 +1,23 @@
+mschap {
+    # These are the default settings from FreeRADIUS 3.0.26
+    use_mppe = yes
+    require_encryption = no
+    require_strong = no
+    
+    # Windows 10 and later workarounds
+    winbind_retry_with_normalised_username = no
+    
+    # For better compatibility
+    with_ntdomain_hack = no
+    ntlm_auth = "/usr/bin/ntlm_auth"
+    # ntlm_auth = "/path/to/ntlm_auth --request-nt-key --domain=MYDOMAIN"
+    
+    # Pass change configuration
+    passchange {
+    }
+    
+    # Cache configuration
+    cache {
+        enable = no
+    }
+}

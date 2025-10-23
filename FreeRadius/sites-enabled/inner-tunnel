@@ -1,0 +1,70 @@
+server inner-tunnel {
+    listen {
+        ipaddr = 127.0.0.1
+        port = 18120
+        type = auth
+    }
+
+    authorize {
+        filter_username
+        preprocess
+        auth_log
+        suffix
+        eap {
+            ok = return
+        }
+        expiration
+        logintime
+        
+        # MAC Authentication for inner tunnel
+        sql
+        
+        # If SQL found Auth-Type := Accept for this MAC, accept immediately
+        if (ok && control:Auth-Type == Accept) {
+            updatedetail
+        }
+        
+        pap
+        mschap
+        digest
+        files
+    }
+
+    authenticate {
+        # For MAC authentication with Auth-Type := Accept
+        Auth-Type Accept {
+            noop
+        }
+        
+        Auth-Type PAP {
+            pap
+        }
+        Auth-Type CHAP {
+            chap
+        }
+        Auth-Type MS-CHAP {
+            mschap
+        }
+        Auth-Type Digest {
+            digest
+        }
+        
+        eap
+    }
+
+    session {
+        radutmp
+        sql
+    }
+
+    post-auth {
+        sql
+        exec
+        remove_reply_message_if_eap
+        Post-Auth-Type REJECT {
+            attr_filter.access_reject
+            eap
+            remove_reply_message_if_eap
+        }
+    }
+}

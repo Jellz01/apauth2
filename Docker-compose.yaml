@@ -6,10 +6,12 @@ services:
     container_name: mysql_server
     restart: always
     environment:
+      DEBUG: "true"
       MYSQL_ROOT_PASSWORD: rootpass
       MYSQL_DATABASE: radius
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
+      MYSQL_HOST: mysql_server 
     ports:
       - "3306:3306"
     volumes:  
@@ -17,7 +19,7 @@ services:
     networks:
       - dalonet
     healthcheck:
-      test: ["CMD", "mysql", "-u", "root", "-p$MYSQL_ROOT_PASSWORD", "-e", "SELECT 1;"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,7 +32,6 @@ services:
       mysql:
         condition: service_healthy
     environment:
-      DEBUG: "true"
       MYSQL_HOST: mysql_server
       MYSQL_USER: radius
       MYSQL_PASSWORD: dalodbpass
