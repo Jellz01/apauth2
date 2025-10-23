@@ -1,9 +1,9 @@
 <?php
 
-$host = 'mysql_server';
+$host = 'mysql';
 $db   = 'radius';
 $user = 'radius';
-$pass = 'dalodbpass';
+$pass = 'radpass';
 
 $conn = mysqli_connect($host, $user, $pass, $db);
 if (!$conn) {
@@ -53,24 +53,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    // Clean MAC (just in case)
-    $mac_clean = strtolower(str_replace([':', '-', '.'], '', $mac_from_form));
+    // Clean MAC - UPPERCASE and remove all separators (exactly like in logs)
+    $mac_clean = strtoupper(str_replace([':', '-', '.', ' '], '', $mac_from_form));
 
-    $stmt = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac) VALUES (?, ?, ?, ?, ?, ?)");
-    if (!$stmt) {
-        die("DB prepare error: " . $conn->error);
-    }
-    $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac_clean);
+    // Start transaction for both inserts
+    mysqli_begin_transaction($conn);
 
-    if ($stmt->execute()) {
-        $stmt->close();
-        mysqli_close($conn);
+    try {
+        // Insert into clients table
+        $stmt1 = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac) VALUES (?, ?, ?, ?, ?, ?)");
+        if (!$stmt1) {
+            throw new Exception("DB prepare error (clients): " . $conn->error);
+        }
+        $stmt1->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac_clean);
+        
+        if (!$stmt1->execute()) {
+            throw new Exception("DB execute error (clients): " . $stmt1->error);
+        }
+        $stmt1->close();
+
+        // Insert into radcheck table for MAC authentication - UPPERCASE, NO SEPARATORS
+        $stmt2 = $conn->prepare("INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Auth-Type', ':=', 'Accept')");
+        if (!$stmt2) {
+            throw new Exception("DB prepare error (radcheck): " . $conn->error);
+        }
+        $stmt2->bind_param("s", $mac_clean);
+        
+        if (!$stmt2->execute()) {
+            throw new Exception("DB execute error (radcheck): " . $stmt2->error);
+        }
+        $stmt2->close();
+
+        // Commit both inserts
+        mysqli_commit($conn);
+        
         header("Location: bienvenido.html?status=success&message=Registro%20completado");
         exit();
-    } else {
-        $stmt->close();
-        mysqli_close($conn);
-        die("DB execute error: " . $stmt->error);
+
+    } catch (Exception $e) {
+        // Rollback on any error
+        mysqli_rollback($conn);
+        die("Database error: " . $e->getMessage());
     }
 
 } else {
