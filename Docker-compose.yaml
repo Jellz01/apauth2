@@ -31,7 +31,7 @@ services:
       DB_USER: radius
       DB_PASS: radpass         # ← match MySQL user password
       RAD_DEBUG: "yes"
-      RAD_CLIENTS: 192.198.0.9
+      RAD_CLIENTS: 192.168.0.9
       RADIUS_KEY: telecom 
       
     # uncomment if you need to reach RADIUS from the host:
