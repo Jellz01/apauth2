@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS clients (
     enabled TINYINT(1) DEFAULT 1
 );
 
+
 -- ================================
 -- 2. Standard FreeRADIUS Tables
 -- ================================

@@ -171,8 +171,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($check_clients->num_rows === 0) {
                 error_log("⚠️ MAC existe en radcheck pero no en clients, insertando...");
                 $insert_client = $conn->prepare("
-                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, registration_date)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
+                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, NOW())
                 ");
                 $insert_client->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
                 $insert_client->execute();
