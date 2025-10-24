@@ -175,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES (?, ?, ?, ?, ?, ?, NOW())
                 ");
                 $insert_client->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
-                $insert_client->execute();
+                $insert_client->execfute();
                 $insert_client->close();
                 error_log("✅ Cliente insertado en clients");
             }
@@ -189,8 +189,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 2) INSERT INTO clients (MAC no existe en radcheck)
         $stmt_clients = $conn->prepare("
-            INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, registration_date)
-            VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
+            INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
         ");
         $stmt_clients->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
         $stmt_clients->execute();
