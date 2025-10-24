@@ -141,16 +141,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Check if it's a duplicate MAC error
         if (strpos($e->getMessage(), 'ya está registrada') !== false) {
-            header("Location: principal.html?status=error&message=Esta%20dirección%20MAC%20ya%20está%20registrada");
+            header("Location: principal.php?status=error&message=Esta%20dirección%20MAC%20ya%20está%20registrada");
         } else {
-            header("Location: principal.html?status=error&message=Error%20en%20el%20registro");
+            header("Location: principal.php?status=error&message=Error%20en%20el%20registro");
         }
         exit();
     }
 
 } else {
     // If not POST, redirect to form
-    header("Location: principal.html");
+    header("Location: principal.php");
     exit();
 }
 ?>
