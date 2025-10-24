@@ -1,104 +1,157 @@
 <?php
-// register_client.php
 
-// ----------------------------
-// 🔧 Database Configuration
-// ----------------------------
-$host = "mysql";   // Change to 127.0.0.1 if not using Docker
-$user = "radius";
-$pass = "radpass";
-$db   = "radius";
+$host = 'mysql';
+$db   = 'radius';
+$user = 'radius';
+$pass = 'radpass';
 
-// ----------------------------
-// 🔌 Database Connection
-// ----------------------------
-$conn = new mysqli($host, $user, $pass, $db);
-if ($conn->connect_error) {
-    die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($conn->connect_error) . "</div>");
+$conn = mysqli_connect($host, $user, $pass, $db);
+if (!$conn) {
+    die("Database connection failed: " . mysqli_connect_error());
 }
 
-// ----------------------------
-// 🧾 Get Parameters from URL
-// ----------------------------
-$mac = isset($_GET['mac']) ? htmlspecialchars($_GET['mac']) : '';
-$ip = isset($_GET['ip']) ? htmlspecialchars($_GET['ip']) : '';
-$url = isset($_GET['url']) ? htmlspecialchars($_GET['url']) : '';
-$ap_mac = isset($_GET['ap_mac']) ? htmlspecialchars($_GET['ap_mac']) : '';
-$essid = isset($_GET['essid']) ? htmlspecialchars($_GET['essid']) : '';
+function validarCedulaEcuatoriana($cedula) {
+    if (!preg_match('/^\d{10}$/', $cedula)) return false;
+    $provincia = intval(substr($cedula, 0, 2));
+    if ($provincia < 1 || $provincia > 24) return false;
+    $ultimoDigito = intval(substr($cedula, 9, 1));
+    $suma = 0;
+    for ($i = 0; $i < 9; $i++) {
+        $num = intval($cedula[$i]);
+        if ($i % 2 == 0) {
+            $num *= 2;
+            if ($num > 9) $num -= 9;
+        }
+        $suma += $num;
+    }
+    $verificador = 10 - ($suma % 10);
+    if ($verificador == 10) $verificador = 0;
+    return $verificador == $ultimoDigito;
+}
 
-// ----------------------------
-// 📥 Process Form Submission
-// ----------------------------
+// Function to clean MAC address (uppercase, no separators) - converts 88:aa:uu to 88AAUU
+function cleanMacAddress($mac) {
+    return strtoupper(str_replace([':', '-', '.', ' '], '', $mac));
+}
+
+// Function to format MAC address for display (with colons)
+function formatMacForDisplay($mac) {
+    $clean_mac = cleanMacAddress($mac);
+    return implode(':', str_split($clean_mac, 2));
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nombre   = $_POST['nombre'];
-    $apellido = $_POST['apellido'];
-    $cedula   = $_POST['cedula'];
-    $telefono = $_POST['telefono'];
-    $email    = $_POST['email'];
-    $mac      = $_POST['mac']; // Hidden field
-    $ip       = $_POST['ip'];
-    $url      = $_POST['url'];
 
-    // ----------------------------
-    // 🕵️ Check if MAC already registered
-    // ----------------------------
-    $check = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
-    if (!$check) {
-        die("<div class='error'>Prepare failed (check): " . htmlspecialchars($conn->error) . "</div>");
+    $nombre   = trim($_POST['nombre'] ?? '');
+    $apellido = trim($_POST['apellido'] ?? '');
+    $cedula   = trim($_POST['cedula'] ?? '');
+    $telefono = trim($_POST['telefono'] ?? '');
+    $correo   = trim($_POST['correo'] ?? '');
+    $mac_from_form = trim($_POST['mac'] ?? '');
+
+    // Clean MAC - converts 88:aa:uu to 88AAUU (uppercase, no separators)
+    $mac_clean = cleanMacAddress($mac_from_form);
+    
+    // Format for display - converts 88:aa:uu to 88:AA:UU
+    $mac_display = formatMacForDisplay($mac_from_form);
+
+    // Debug logging
+    error_log("MAC Address Processing:");
+    error_log("Raw MAC from form: " . $mac_from_form);
+    error_log("Cleaned MAC (for DB): " . $mac_clean);
+    error_log("Display MAC: " . $mac_display);
+
+    if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
+        header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios");
+        exit();
     }
-    $check->bind_param("s", $mac);
-    $check->execute();
-    $check->store_result();
 
-    if ($check->num_rows > 0) {
-        // Device already registered - redirect immediately
-        if (!empty($url)) {
-            header("Location: " . urldecode($url));
-            exit;
-        } else {
-            header("Location: bienvenido.html");
-            exit;
-        }
-    } else {
-        // ----------------------------
-        // 🧩 Insert into clients table
-        // ----------------------------
-        $query = "INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-                  VALUES (?, ?, ?, ?, ?, ?, 1)";
-        $stmt = $conn->prepare($query);
-        if (!$stmt) {
-            die("<div class='error'>Prepare failed (clients): " . htmlspecialchars($conn->error) . "</div>");
-        }
-        $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac);
+    if (!validarCedulaEcuatoriana($cedula)) {
+        header("Location: principal.html?status=error&message=Cédula%20inválida");
+        exit();
+    }
 
-        if ($stmt->execute()) {
-            // ----------------------------
-            // ✅ Also insert into radcheck
-            // ----------------------------
-            $rad = $conn->prepare("INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Auth-Type', ':=', 'Accept')");
-            if (!$rad) {
-                die("<div class='error'>Prepare failed (radcheck): " . htmlspecialchars($conn->error) . "</div>");
+    if (!preg_match('/^09\d{8}$/', $telefono)) {
+        header("Location: principal.html?status=error&message=Teléfono%20inválido");
+        exit();
+    }
+
+    // Start transaction for both inserts
+    mysqli_begin_transaction($conn);
+
+    try {
+        // Check if MAC already exists in clients table
+        $check_stmt = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
+        $check_stmt->bind_param("s", $mac_clean);
+        $check_stmt->execute();
+        $check_stmt->store_result();
+        
+        if ($check_stmt->num_rows > 0) {
+            throw new Exception("Esta dirección MAC ya está registrada en el sistema");
+        }
+        $check_stmt->close();
+
+        // Insert into clients table
+        $stmt1 = $conn->prepare("INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac) VALUES (?, ?, ?, ?, ?, ?)");
+        if (!$stmt1) {
+            throw new Exception("DB prepare error (clients): " . $conn->error);
+        }
+        $stmt1->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $correo, $mac_clean);
+        
+        if (!$stmt1->execute()) {
+            throw new Exception("DB execute error (clients): " . $stmt1->error);
+        }
+        $stmt1->close();
+
+        // Insert into radcheck table for MAC authentication - store in multiple formats
+        $mac_formats = [
+            $mac_clean, // Uppercase, no separators: 88AAUU
+            strtolower($mac_clean), // Lowercase, no separators: 88aauu
+        ];
+
+        $insert_count = 0;
+        foreach ($mac_formats as $mac_format) {
+            $stmt2 = $conn->prepare("INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Auth-Type', ':=', 'Accept')");
+            if (!$stmt2) {
+                throw new Exception("DB prepare error (radcheck): " . $conn->error);
             }
-            $rad->bind_param("s", $mac);
+            $stmt2->bind_param("s", $mac_format);
             
-            if ($rad->execute()) {
-                // ----------------------------
-                // 🔄 Redirect back to Aruba AP (RAUTH) or welcome page
-                // ----------------------------
-                if (!empty($url)) {
-                    header("Location: " . urldecode($url));
-                    exit;
-                } else {
-                    header("Location: bienvenido.html");
-                    exit;
-                }
+            if ($stmt2->execute()) {
+                $insert_count++;
             } else {
-                die("<div class='error'>Error inserting into radcheck: " . htmlspecialchars($rad->error) . "</div>");
+                // If duplicate entry, ignore and continue (it's okay if one format already exists)
+                if (strpos($stmt2->error, 'Duplicate entry') === false) {
+                    throw new Exception("DB execute error (radcheck): " . $stmt2->error);
+                }
             }
-        } else {
-            die("<div class='error'>Error inserting into clients: " . htmlspecialchars($stmt->error) . "</div>");
+            $stmt2->close();
         }
+
+        // Commit both inserts
+        mysqli_commit($conn);
+        
+        // Success - redirect with success message
+        header("Location: bienvenido.html?status=success&message=Registro%20completado&mac=" . urlencode($mac_display));
+        exit();
+
+    } catch (Exception $e) {
+        // Rollback on any error
+        mysqli_rollback($conn);
+        
+        // Check if it's a duplicate MAC error
+        if (strpos($e->getMessage(), 'ya está registrada') !== false) {
+            header("Location: principal.html?status=error&message=Esta%20dirección%20MAC%20ya%20está%20registrada");
+        } else {
+            header("Location: principal.html?status=error&message=Error%20en%20el%20registro");
+        }
+        exit();
     }
+
+} else {
+    // If not POST, redirect to form
+    header("Location: principal.html");
+    exit();
 }
 ?>
 <!DOCTYPE html>
