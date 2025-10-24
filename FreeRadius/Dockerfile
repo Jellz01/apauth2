@@ -13,7 +13,9 @@ LABEL net.2stacks.name="2stacks" \
       net.2stacks.version="1.5.1" \
       net.2stacks.radius.version="3.0.20-r1"
 
-RUN apk --update add freeradius freeradius-mysql freeradius-eap openssl
+
+
+RUN apk --update add freeradius freeradius-mysql  freeradius-utils freeradius-eap openssl
 
 EXPOSE 1812/udp 1813/udp
 
