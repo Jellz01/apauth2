@@ -10,94 +10,146 @@ $pass = "radpass";
 $db   = "radius";
 
 // ----------------------------
-// 🔌 Database Connection
+// 🧰 Helpers
 // ----------------------------
-$conn = new mysqli($host, $user, $pass, $db);
-if ($conn->connect_error) {
-    die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($conn->connect_error) . "</div>");
+function normalize_mac($mac_raw) {
+    // Remove everything that's not hex, then uppercase
+    $hex = preg_replace('/[^0-9A-Fa-f]/', '', (string)$mac_raw);
+    return strtoupper($hex);
+}
+
+function safe_url($u) {
+    // Allow only http/https (avoid header injection / javascript:)
+    $u = trim((string)$u);
+    if ($u === '') return '';
+    $parts = parse_url($u);
+    if (!$parts || !isset($parts['scheme'])) return '';
+    $scheme = strtolower($parts['scheme']);
+    return ($scheme === 'http' || $scheme === 'https') ? $u : '';
+}
+
+function redirect_or_welcome($url) {
+    $url = safe_url($url);
+    if (!headers_sent()) {
+        header("Location: " . ($url !== '' ? $url : "bienvenido.html"));
+    } else {
+        echo '<script>location.href=' . json_encode($url !== '' ? $url : "bienvenido.html") . ';</script>';
+    }
+    exit;
 }
 
 // ----------------------------
-// 🧾 Get Parameters from URL
+// 🔌 Database Connection
 // ----------------------------
-$mac = isset($_GET['mac']) ? htmlspecialchars($_GET['mac']) : '';
-$ip = isset($_GET['ip']) ? htmlspecialchars($_GET['ip']) : '';
-$url = isset($_GET['url']) ? htmlspecialchars($_GET['url']) : '';
-$ap_mac = isset($_GET['ap_mac']) ? htmlspecialchars($_GET['ap_mac']) : '';
-$essid = isset($_GET['essid']) ? htmlspecialchars($_GET['essid']) : '';
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+try {
+    $conn = new mysqli($host, $user, $pass, $db);
+    $conn->set_charset('utf8mb4');
+} catch (Exception $e) {
+    die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($e->getMessage()) . "</div>");
+}
+
+// ----------------------------
+// 🧾 Get Parameters from URL (RAUTH / captive portal)
+// ----------------------------
+$mac_raw  = $_GET['mac']    ?? '';
+$ip_raw   = $_GET['ip']     ?? '';
+$url_raw  = $_GET['url']    ?? '';
+$ap_raw   = $_GET['ap_mac'] ?? '';
+$essid    = $_GET['essid']  ?? '';
+
+$mac_norm = normalize_mac($mac_raw);
+$ap_norm  = normalize_mac($ap_raw);
+$ip       = trim($ip_raw);
+$url_in   = safe_url($url_raw);
 
 // ----------------------------
 // 📥 Process Form Submission
 // ----------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nombre   = $_POST['nombre'];
-    $apellido = $_POST['apellido'];
-    $cedula   = $_POST['cedula'];
-    $telefono = $_POST['telefono'];
-    $email    = $_POST['email'];
-    $mac      = $_POST['mac']; // Hidden field
-    $ip       = $_POST['ip'];
-    $url      = $_POST['url'];
+    // Read POST (user fields)
+    $nombre   = $_POST['nombre']   ?? '';
+    $apellido = $_POST['apellido'] ?? '';
+    $cedula   = $_POST['cedula']   ?? '';
+    $telefono = $_POST['telefono'] ?? '';
+    $email    = $_POST['email']    ?? '';
 
-    // ----------------------------
-    // 🕵️ Check if MAC already registered
-    // ----------------------------
-    $check = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
-    if (!$check) {
-        die("<div class='error'>Prepare failed (check): " . htmlspecialchars($conn->error) . "</div>");
+    // Hidden fields (may come from form); normalize MAC again just in case
+    $mac_post  = $_POST['mac'] ?? '';
+    $ip_post   = $_POST['ip']  ?? '';
+    $url_post  = $_POST['url'] ?? '';
+
+    $mac_norm  = normalize_mac($mac_post);
+    $ip        = trim($ip_post);
+    $url_in    = safe_url($url_post);
+
+    // If MAC is empty after normalization, bail gracefully
+    if ($mac_norm === '') {
+        die("<div class='error'>❌ MAC address missing or invalid.</div>");
     }
-    $check->bind_param("s", $mac);
-    $check->execute();
-    $check->store_result();
 
-    if ($check->num_rows > 0) {
-        // Device already registered - redirect immediately
-        if (!empty($url)) {
-            header("Location: " . urldecode($url));
-            exit;
-        } else {
-            header("Location: bienvenido.html");
-            exit;
-        }
-    } else {
-        // ----------------------------
-        // 🧩 Insert into clients table
-        // ----------------------------
-        $query = "INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-                  VALUES (?, ?, ?, ?, ?, ?, 1)";
-        $stmt = $conn->prepare($query);
-        if (!$stmt) {
-            die("<div class='error'>Prepare failed (clients): " . htmlspecialchars($conn->error) . "</div>");
-        }
-        $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac);
+    try {
+        // Use a transaction so clients + radcheck are consistent
+        $conn->begin_transaction();
 
-        if ($stmt->execute()) {
-            // ----------------------------
-            // ✅ Also insert into radcheck
-            // ----------------------------
-            $rad = $conn->prepare("INSERT INTO radcheck (username, attribute, op, value) VALUES (?, 'Auth-Type', ':=', 'Accept')");
-            if (!$rad) {
-                die("<div class='error'>Prepare failed (radcheck): " . htmlspecialchars($conn->error) . "</div>");
-            }
-            $rad->bind_param("s", $mac);
-            
-            if ($rad->execute()) {
-                // ----------------------------
-                // 🔄 Redirect back to Aruba AP (RAUTH) or welcome page
-                // ----------------------------
-                if (!empty($url)) {
-                    header("Location: " . urldecode($url));
-                    exit;
-                } else {
-                    header("Location: bienvenido.html");
-                    exit;
-                }
-            } else {
-                die("<div class='error'>Error inserting into radcheck: " . htmlspecialchars($rad->error) . "</div>");
-            }
-        } else {
-            die("<div class='error'>Error inserting into clients: " . htmlspecialchars($stmt->error) . "</div>");
+        // 1) Check if this device is already registered (using normalized MAC)
+        $check = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
+        $check->bind_param("s", $mac_norm);
+        $check->execute();
+        $check->store_result();
+
+        if ($check->num_rows > 0) {
+            // Already registered → just redirect right away
+            $check->close();
+            $conn->commit();
+            redirect_or_welcome($url_in);
         }
+        $check->close();
+
+        // 2) Insert into clients (store normalized MAC)
+        $stmt = $conn->prepare("
+            INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+        ");
+        $stmt->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
+        $stmt->execute();
+        $stmt->close();
+
+        // 3) Ensure radcheck has Auth-Type := Accept for this MAC (normalized)
+        //    First see if there's already such a row to avoid duplicates
+        $rad_sel = $conn->prepare("
+            SELECT id FROM radcheck
+            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
+            LIMIT 1
+        ");
+        $rad_sel->bind_param("s", $mac_norm);
+        $rad_sel->execute();
+        $rad_sel->store_result();
+
+        if ($rad_sel->num_rows === 0) {
+            $rad_sel->close();
+
+            $rad_ins = $conn->prepare("
+                INSERT INTO radcheck (username, attribute, op, value)
+                VALUES (?, 'Auth-Type', ':=', 'Accept')
+            ");
+            $rad_ins->bind_param("s", $mac_norm);
+            $rad_ins->execute();
+            $rad_ins->close();
+        } else {
+            $rad_sel->close();
+        }
+
+        // All good 🎉
+        $conn->commit();
+        redirect_or_welcome($url_in);
+
+    } catch (Exception $e) {
+        // Rollback on any error and show a friendly message
+        if ($conn->errno) {
+            $conn->rollback();
+        }
+        die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . "</div>");
     }
 }
 ?>
@@ -106,20 +158,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
 <meta charset="UTF-8">
 <title>Client Registration</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 * { box-sizing: border-box; }
-body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 10px; }
+body {
+  font-family: Arial, sans-serif; background: #f4f4f4; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 10px;
+}
 .top-image, .bottom-image { width: 100%; max-width: 400px; border-radius: 10px; }
-.form-container { background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.15); width: 100%; max-width: 400px; margin: 15px 0; }
+.form-container {
+  background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  width: 100%; max-width: 400px; margin: 15px 0;
+}
 h2 { color: #333; text-align: center; margin-bottom: 20px; font-size: 1.4rem; }
-input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
-button { width: 100%; padding: 14px; background: #667eea; color: white; border: none; border-radius: 8px; font-size: 1.05rem; cursor: pointer; margin-top: 10px; transition: background 0.3s ease; }
+input {
+  width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem;
+}
+button {
+  width: 100%; padding: 14px; background: #667eea; color: white; border: none; border-radius: 8px;
+  font-size: 1.05rem; cursor: pointer; margin-top: 10px; transition: background 0.3s ease;
+}
 button:hover { background: #5568d3; }
-.error { background: #ffebee; color: #c62828; padding: 10px; border-radius: 8px; margin: 10px 0; text-align: center; font-size: 0.9rem; display: block; }
-.mac-display { background: #f9f9f9; padding: 10px; border-radius: 8px; margin-top: 12px; font-size: 0.9rem; color: #333; text-align: center; word-wrap: break-word; }
-.info-display { background: #e3f2fd; padding: 8px; border-radius: 6px; margin: 6px 0; font-size: 0.85rem; color: #1565c0; text-align: center; }
-@media (max-width: 480px) { .form-container { padding: 20px 15px; border-radius: 10px; } input, button { font-size: 1rem; } h2 { font-size: 1.3rem; } }
+.error {
+  background: #ffebee; color: #c62828; padding: 10px; border-radius: 8px; margin: 10px 0;
+  text-align: center; font-size: 0.9rem; display: block;
+}
+.mac-display {
+  background: #f9f9f9; padding: 10px; border-radius: 8px; margin-top: 12px; font-size: 0.9rem;
+  color: #333; text-align: center; word-wrap: break-word;
+}
+.info-display {
+  background: #e3f2fd; padding: 8px; border-radius: 6px; margin: 6px 0; font-size: 0.85rem;
+  color: #1565c0; text-align: center;
+}
+@media (max-width: 480px) {
+  .form-container { padding: 20px 15px; border-radius: 10px; }
+  input, button { font-size: 1rem; }
+  h2 { font-size: 1.3rem; }
+}
 </style>
 </head>
 <body>
@@ -129,34 +205,41 @@ button:hover { background: #5568d3; }
 
     <div class="form-container">
         <h2>Register to Access Wi-Fi</h2>
-        <form method="POST">
-            <input type="text" name="nombre" placeholder="First Name" required>
-            <input type="text" name="apellido" placeholder="Last Name" required>
-            <input type="text" name="cedula" placeholder="ID / Cedula" required>
-            <input type="text" name="telefono" placeholder="Phone Number" required>
-            <input type="email" name="email" placeholder="Email" required>
-            
-            <!-- Hidden fields for RAUTH -->
-            <input type="hidden" name="mac" value="<?php echo $mac; ?>">
-            <input type="hidden" name="ip" value="<?php echo $ip; ?>">
-            <input type="hidden" name="url" value="<?php echo $url; ?>">
 
-            <!-- 👇 MAC shown above the register button -->
-            <?php if (!empty($mac)): ?>
+        <form method="POST" autocomplete="on">
+            <input type="text" name="nombre"   placeholder="First Name"     required>
+            <input type="text" name="apellido" placeholder="Last Name"      required>
+            <input type="text" name="cedula"   placeholder="ID / Cédula"    required>
+            <input type="text" name="telefono" placeholder="Phone Number"   required>
+            <input type="email" name="email"   placeholder="Email"          required>
+
+            <!-- Hidden fields (normalized MAC; IP/URL passed through) -->
+            <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
+            <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
+            <input type="hidden" name="url" value="<?php echo htmlspecialchars($url_in); ?>">
+
+            <!-- 👇 Visible info -->
+            <?php if ($mac_norm !== ''): ?>
                 <div class="mac-display">
-                    <strong>Device MAC:</strong><br><?php echo $mac; ?>
+                    <strong>Device MAC (normalized):</strong><br><?php echo htmlspecialchars($mac_norm); ?>
                 </div>
             <?php endif; ?>
 
-            <?php if (!empty($ip)): ?>
+            <?php if ($ip !== ''): ?>
                 <div class="info-display">
-                    <strong>IP:</strong> <?php echo $ip; ?>
+                    <strong>IP:</strong> <?php echo htmlspecialchars($ip); ?>
                 </div>
             <?php endif; ?>
 
-            <?php if (!empty($essid)): ?>
+            <?php if ($essid !== ''): ?>
                 <div class="info-display">
-                    <strong>Network:</strong> <?php echo $essid; ?>
+                    <strong>Network:</strong> <?php echo htmlspecialchars($essid); ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($ap_norm !== ''): ?>
+                <div class="info-display">
+                    <strong>AP MAC:</strong> <?php echo htmlspecialchars($ap_norm); ?>
                 </div>
             <?php endif; ?>
 
