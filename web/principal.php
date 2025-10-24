@@ -62,17 +62,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     error_log("Display MAC: " . $mac_display);
 
     if (!$nombre || !$apellido || !$cedula || !$telefono || !$correo) {
-        header("Location: principal.html?status=error&message=Todos%20los%20campos%20son%20obligatorios");
+        header("Location: principal.php?status=error&message=Todos%20los%20campos%20son%20obligatorios");
         exit();
     }
 
     if (!validarCedulaEcuatoriana($cedula)) {
-        header("Location: principal.html?status=error&message=Cédula%20inválida");
+        header("Location: principal.php?status=error&message=Cédula%20inválida");
         exit();
     }
 
     if (!preg_match('/^09\d{8}$/', $telefono)) {
-        header("Location: principal.html?status=error&message=Teléfono%20inválido");
+        header("Location: principal.php?status=error&message=Teléfono%20inválido");
         exit();
     }
 
