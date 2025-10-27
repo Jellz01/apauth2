@@ -1,5 +1,8 @@
 <?php
-// register_client.php - VERSIÓN CORREGIDA
+// register_client.php - VERSIÓN CORREGIDA CON SESIÓN
+
+// Iniciar sesión ANTES de cualquier output
+session_start();
 
 // ----------------------------
 // 🐛 HABILITAR DEBUGGING
@@ -25,8 +28,13 @@ function normalize_mac($mac_raw) {
     return strtoupper($hex);
 }
 
-function redirect_to_bienvenido() {
-    error_log("🎯 REDIRIGIENDO A BIENVENIDO.HTML");
+function redirect_to_bienvenido($mac_norm, $ip) {
+    error_log("🎯 REDIRIGIENDO A BIENVENIDO.PHP CON MAC: $mac_norm");
+    
+    // Guardar en sesión
+    $_SESSION['registration_mac'] = $mac_norm;
+    $_SESSION['registration_ip'] = $ip;
+    $_SESSION['coa_executed'] = false;
     
     $bienvenido_url = 'bienvenido.php';
     
@@ -37,11 +45,11 @@ function redirect_to_bienvenido() {
         echo '<!DOCTYPE html>
         <html>
         <head>
-            <meta http-equiv="refresh" content="0;url=' . $bienvenido_url . '">
+            <meta http-equiv="refresh" content="0;url=' . htmlspecialchars($bienvenido_url) . '">
         </head>
         <body>
-            <p>Redireccionando... <a href="' . $bienvenido_url . '">Click aquí</a></p>
-            <script>window.location.href = "' . $bienvenido_url . '";</script>
+            <p>Redireccionando... <a href="' . htmlspecialchars($bienvenido_url) . '">Click aquí</a></p>
+            <script>window.location.href = "' . htmlspecialchars($bienvenido_url) . '";</script>
         </body>
         </html>';
         exit;
@@ -179,16 +187,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, ejecutando CoA...");
             
             execute_coa($mac_norm, $ip);
-            redirect_to_bienvenido();
+            redirect_to_bienvenido($mac_norm, $ip);
         }
         $check_radcheck->close();
 
-        // 2) INSERT INTO clients - CORREGIDO: "ssssss" en lugar de "sssssi"
+        // 2) INSERT INTO clients
         $stmt_clients = $conn->prepare("
             INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
             VALUES (?, ?, ?, ?, ?, ?, 1)
         ");
-        // CORRECCIÓN: Todos son strings, usar "ssssss"
         $stmt_clients->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
         $stmt_clients->execute();
         $client_id = $conn->insert_id;
@@ -214,8 +221,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         execute_coa($mac_norm, $ip);
         
         // 5) REDIRIGIR
-        error_log("🔄 REDIRIGIENDO A BIENVENIDO.HTML");
-        redirect_to_bienvenido();
+        error_log("🔄 REDIRIGIENDO A BIENVENIDO.PHP");
+        redirect_to_bienvenido($mac_norm, $ip);
 
     } catch (Exception $e) {
         error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
@@ -230,7 +237,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($conn->errno == 1062) {
             error_log("⚠️ MAC $mac_norm YA EXISTE (error 1062), ejecutando CoA...");
             execute_coa($mac_norm, $ip);
-            redirect_to_bienvenido();
+            redirect_to_bienvenido($mac_norm, $ip);
         } else {
             die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
         }
@@ -283,7 +290,6 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Registro Wi-Fi - GoNet</title>
     <style>
-        /* [TUS ESTILOS ACTUALES - SE MANTIENEN IGUAL] */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Arial', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; color: #333; }
         .top-image, .bottom-image { width: 100%; max-width: 400px; border-radius: 15px; margin: 10px 0; box-shadow: 0 8px 25px rgba(0,0,0,0.15); }

@@ -1,5 +1,8 @@
 <?php
-// bienvenido.php
+// bienvenido.php - RECIBE MAC Y IP DE SESIÓN
+
+// Iniciar sesión ANTES de cualquier output
+session_start();
 
 // ----------------------------
 // 🔧 Configuration for CoA
@@ -9,16 +12,21 @@ $coa_port = 3799;          // CoA port (RFC 3576)
 $coa_secret = 'telecom';   // Must match your clients.conf coa secret
 
 // ----------------------------
-// 📥 Get MAC from URL
+// 📥 Get MAC and IP from SESSION
 // ----------------------------
-$mac = isset($_GET['mac']) ? trim($_GET['mac']) : '';
+$mac = isset($_SESSION['registration_mac']) ? trim($_SESSION['registration_mac']) : '';
+$ip = isset($_SESSION['registration_ip']) ? trim($_SESSION['registration_ip']) : '';
 $coa_sent = false;
 $coa_message = '';
+
+error_log("🎯 BIENVENIDO.PHP - MAC de sesión: $mac, IP: $ip");
 
 // ----------------------------
 // 📡 Send CoA if MAC exists
 // ----------------------------
-if (!empty($mac)) {
+if (!empty($mac) && !isset($_SESSION['coa_executed'])) {
+    error_log("🔥 ENVIANDO CoA PARA MAC: $mac");
+    
     $mac = preg_replace('/[^A-Fa-f0-9:]/', '', $mac);
 
     $attributes = "User-Name=$mac\nAcct-Session-Id=coa-reauth-" . time();
@@ -32,13 +40,28 @@ if (!empty($mac)) {
         $coa_port,
         escapeshellarg($coa_secret)
     );
+    
+    error_log("🖥️ COMANDO CoA: $command");
+    
+    $output = [];
     exec($command, $output, $return_var);
     unlink($tmpFile);
 
     $coa_sent = ($return_var === 0);
     $coa_message = $coa_sent
-        ? '✅ CoA enviado exitosamente'
+        ? '✅ CoA enviado exitosamente - Conectándote...'
         : '⚠️ Error enviando CoA: ' . implode("\n", $output);
+    
+    error_log("📋 OUTPUT CoA: $coa_message");
+    
+    // Marcar CoA como ejecutado
+    $_SESSION['coa_executed'] = true;
+} elseif (!empty($mac) && isset($_SESSION['coa_executed'])) {
+    $coa_sent = true;
+    $coa_message = '✅ Ya conectado - Disfrutando de GoNet Wi-Fi';
+    error_log("ℹ️ CoA ya fue ejecutado previamente");
+} else {
+    error_log("⚠️ No hay MAC en sesión");
 }
 ?>
 <!DOCTYPE html>
@@ -56,7 +79,7 @@ if (!empty($mac)) {
         
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            font-family: Arial, sans-serif;
+            font-family: 'Arial', sans-serif;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -64,6 +87,7 @@ if (!empty($mac)) {
             height: 100vh;
             text-align: center;
             padding: 20px;
+            color: #333;
         }
         
         .logo {
@@ -83,6 +107,18 @@ if (!empty($mac)) {
             width: 100%;
             font-size: 1.1rem;
             color: #2c3e50;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         
         .coa-status.success {
@@ -114,7 +150,47 @@ if (!empty($mac)) {
         
         .mac strong {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+        }
+        
+        .mac code {
+            background: rgba(0, 0, 0, 0.05);
+            padding: 8px 12px;
+            border-radius: 8px;
+            display: inline-block;
+            margin-top: 5px;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: currentColor;
+            border-radius: 50%;
+            opacity: 0.7;
+            margin: 0 3px;
+            animation: pulse 1.4s infinite;
+        }
+        
+        .loading:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .loading:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes pulse {
+            0%, 60%, 100% {
+                opacity: 0.7;
+                transform: scale(0.8);
+            }
+            30% {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
     </style>
 </head>
@@ -123,16 +199,19 @@ if (!empty($mac)) {
 
     <?php if (!empty($mac)): ?>
         <div class="coa-status <?php echo $coa_sent ? 'success' : 'error'; ?>">
-            <?php echo htmlspecialchars($coa_message); ?>
+            <div>
+                <?php echo htmlspecialchars($coa_message); ?>
+                <?php if (!$coa_sent): ?>
+                    <div style="margin-top: 10px;">
+                        <span class="loading"></span><span class="loading"></span><span class="loading"></span>
+                    </div>
+                <?php endif; ?>
+            </div>
             <div class="mac">
                 <strong>🔧 Dispositivo MAC:</strong>
-                <?php echo htmlspecialchars($mac); ?>
+                <code><?php echo htmlspecialchars($mac); ?></code>
             </div>
-        </div>
-    <?php else: ?>
-        <div class="coa-status warning">
-            ⚠️ No se detectó ninguna dirección MAC.
-        </div>
-    <?php endif; ?>
-</body>
-</html>
+            <?php if (!empty($ip)): ?>
+                <div class="mac">
+                    <strong>🌐 Dirección IP:</strong>
+                    <code><?php echo html
