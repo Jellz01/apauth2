@@ -1,5 +1,5 @@
 <?php
-// register_client.php - VERSIÓN COMPLETA CON VERIFICACIÓN RADCHECK Y CoA
+// register_client.php - VERSIÓN SIMPLIFICADA SIN GUARDAR TÉRMINOS EN BD
 
 // ----------------------------
 // 🐛 HABILITAR DEBUGGING
@@ -26,25 +26,20 @@ function normalize_mac($mac_raw) {
 
 function safe_url_improved($u) {
     $u = trim((string)$u);
-    if ($u === '') {
+    
+    // Si está vacío o no es una URL válida, usar bienvenido.html
+    if ($u === '' || filter_var($u, FILTER_VALIDATE_URL) === false) {
+        error_log("🔄 URL INVALID OR EMPTY, DEFAULTING TO BIENVENIDO");
         return 'bienvenido.html';
     }
     
-    if (!preg_match('/^https?:\/\//i', $u)) {
-        $u = 'http://' . $u;
-    }
-    
-    $parts = parse_url($u);
-    if (!$parts || !isset($parts['host'])) {
-        return 'bienvenido.html';
-    }
-    
-    $scheme = strtolower($parts['scheme'] ?? 'http');
-    return ($scheme === 'http' || $scheme === 'https') ? $u : 'bienvenido.html';
+    return $u;
 }
 
 function redirect_or_welcome($url) {
     $url = safe_url_improved($url);
+    
+    error_log("🎯 REDIRIGIENDO A: " . $url);
     
     if (!headers_sent()) {
         header("Location: " . $url);
@@ -73,7 +68,7 @@ function execute_coa($mac, $ip) {
     error_log("🔥 EJECUTANDO CoA PARA MAC: $mac, IP: $ip");
     
     // Método 1: Usar radclient para CoA
-    $secret = "testing123"; // CAMBIA ESTO por tu secret de FreeRADIUS
+    $secret = "testing123";
     $coa_command = "echo 'User-Name=$mac' | radclient -x $ip:3799 disconnect $secret 2>&1";
     
     $output = shell_exec($coa_command);
@@ -114,6 +109,14 @@ $ap_norm  = normalize_mac($ap_raw);
 $ip       = trim($ip_raw);
 $url_in   = $url_raw;
 
+// Debug de parámetros
+error_log("🔗 PARÁMETROS RECIBIDOS:");
+error_log("   - MAC: $mac_norm");
+error_log("   - IP: $ip");
+error_log("   - URL: $url_in");
+error_log("   - AP: $ap_norm");
+error_log("   - ESSID: $essid");
+
 // ----------------------------
 // 📥 Process Form Submission
 // ----------------------------
@@ -125,6 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $cedula   = $_POST['cedula']   ?? '';
     $telefono = $_POST['telefono'] ?? '';
     $email    = $_POST['email']    ?? '';
+    $terminos = isset($_POST['terminos']) ? 1 : 0;
 
     $mac_post  = $_POST['mac'] ?? '';
     $ip_post   = $_POST['ip']  ?? '';
@@ -135,7 +139,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $url_in    = $url_post;
 
     error_log("📝 DATOS FORMULARIO:");
-    error_log("   Nombre: $nombre, MAC: $mac_norm, IP: $ip, URL: $url_in");
+    error_log("   Nombre: $nombre, MAC: $mac_norm, IP: $ip, URL: $url_in, Términos: $terminos");
+
+    // Validar términos y condiciones (SOLO VALIDACIÓN, NO SE GUARDA EN BD)
+    if (!$terminos) {
+        error_log("❌ Términos y condiciones no aceptados");
+        die("<div class='error'>❌ Debes aceptar los términos y condiciones para registrarte.</div>");
+    }
 
     if ($mac_norm === '') {
         error_log("❌ MAC address vacía o inválida");
@@ -162,32 +172,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, ejecutando CoA...");
             
-            // Verificar si también existe en clients, si no, insertar
-            $check_clients = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
-            $check_clients->bind_param("s", $mac_norm);
-            $check_clients->execute();
-            $check_clients->store_result();
-            
-            if ($check_clients->num_rows === 0) {
-                error_log("⚠️ MAC existe en radcheck pero no en clients, insertando...");
-                $insert_client = $conn->prepare("
-                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-                    VALUES (?, ?, ?, ?, ?, ?, 1)
-                ");
-                $insert_client->bind_param("sssssi", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
-                $insert_client->execute();
-                $insert_client->close();
-                error_log("✅ Cliente insertado en clients");
-            }
-            $check_clients->close();
-            
             // Ejecutar CoA y redirigir
             execute_coa($mac_norm, $ip);
+            
+            // Debug antes de redirigir
+            error_log("🎯 PRE-REDIRECCIÓN - URL: $url_in");
             redirect_or_welcome($url_in);
         }
         $check_radcheck->close();
 
         // 2) INSERT INTO clients (MAC no existe en radcheck)
+        // SOLO insertamos datos básicos, sin campo de términos
         $stmt_clients = $conn->prepare("
             INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
             VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -216,8 +211,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         error_log("🎉 REGISTRO COMPLETADO, EJECUTANDO CoA...");
         execute_coa($mac_norm, $ip);
         
-        // 5) Redirigir
+        // 5) Redirigir con debug extensivo
         error_log("🔄 REDIRIGIENDO A: $url_in");
+        error_log("🎯 ESTADO FINAL:");
+        error_log("   - MAC: $mac_norm");
+        error_log("   - IP: $ip");
+        error_log("   - URL: $url_in");
+        error_log("   - Headers sent: " . (headers_sent() ? 'YES' : 'NO'));
+        
         redirect_or_welcome($url_in);
 
     } catch (Exception $e) {
@@ -364,6 +365,13 @@ if ($mac_norm !== '') {
             box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
         }
         
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
         .error {
             background: #ffebee; 
             color: #c62828; 
@@ -426,6 +434,53 @@ if ($mac_norm !== '') {
             color: #e74c3c;
         }
         
+        .terminos-container {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border: 2px solid #e9ecef;
+        }
+        
+        .terminos-checkbox {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        
+        .terminos-checkbox input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-top: 2px;
+        }
+        
+        .terminos-text {
+            font-size: 0.9rem;
+            color: #555;
+            line-height: 1.4;
+        }
+        
+        .terminos-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .terminos-link:hover {
+            text-decoration: underline;
+        }
+        
+        .debug-info {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-size: 0.8rem;
+            color: #666;
+            border-left: 4px solid #999;
+        }
+        
         @media (max-width: 480px) {
             .form-container { 
                 padding: 25px 20px; 
@@ -471,7 +526,15 @@ if ($mac_norm !== '') {
             </div>
         <?php endif; ?>
 
-        <form method="POST" autocomplete="on">
+        <!-- Debug info (opcional - puedes eliminar esto en producción) -->
+        <div class="debug-info">
+            <strong>Info de Conexión:</strong><br>
+            MAC: <?php echo htmlspecialchars($mac_norm); ?><br>
+            IP: <?php echo htmlspecialchars($ip); ?><br>
+            URL: <?php echo htmlspecialchars($url_in); ?>
+        </div>
+
+        <form method="POST" autocomplete="on" id="registrationForm">
             <div class="form-group">
                 <label class="required">Nombre</label>
                 <input type="text" name="nombre" placeholder="Tu nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
@@ -495,6 +558,18 @@ if ($mac_norm !== '') {
             <div class="form-group">
                 <label class="required">Email</label>
                 <input type="email" name="email" placeholder="correo@ejemplo.com" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+            </div>
+
+            <!-- Términos y Condiciones - SOLO VALIDACIÓN EN FRONTEND -->
+            <div class="terminos-container">
+                <div class="terminos-checkbox">
+                    <input type="checkbox" name="terminos" id="terminos" required>
+                    <label for="terminos" class="terminos-text">
+                        Acepto los <a href="terminos.html" target="_blank" class="terminos-link">Términos y Condiciones</a> 
+                        y la <a href="privacidad.html" target="_blank" class="terminos-link">Política de Privacidad</a> 
+                        de GoNet Wi-Fi.
+                    </label>
+                </div>
             </div>
 
             <!-- Hidden fields -->
@@ -528,18 +603,32 @@ if ($mac_norm !== '') {
                 </div>
             <?php endif; ?>
 
-            <button type="submit">
+            <button type="submit" id="submitBtn">
                 <?php echo $mac_status === 'registered' ? '✅ Conectar Ahora' : '🚀 Registrar y Conectar'; ?>
             </button>
-            
-            <div style="text-align: center; margin-top: 15px; font-size: 0.8rem; color: #666;">
-                Al registrarte, aceptas nuestros términos y condiciones
-            </div>
         </form>
     </div>
 
     <!-- Bottom banner -->
     <img src="banner.png" alt="Banner" class="bottom-image">
+
+    <script>
+        // Validación de términos antes de enviar el formulario
+        document.getElementById('registrationForm').addEventListener('submit', function(e) {
+            const terminosCheckbox = document.getElementById('terminos');
+            if (!terminosCheckbox.checked) {
+                e.preventDefault();
+                alert('Debes aceptar los términos y condiciones para continuar.');
+                terminosCheckbox.focus();
+                return false;
+            }
+            
+            // Mostrar loading en el botón
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.innerHTML = '⏳ Procesando...';
+            submitBtn.disabled = true;
+        });
+    </script>
 
 </body>
 </html>
