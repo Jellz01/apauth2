@@ -1,0 +1,69 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0.42
+    container_name: mysql
+    command: ["--default-authentication-plugin=mysql_native_password"]
+    environment:
+      MYSQL_ROOT_PASSWORD: radius
+      MYSQL_DATABASE: radius
+      MYSQL_USER: radius
+      MYSQL_PASSWORD: radpass
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/radius-lf.sql:/docker-entrypoint-initdb.d/1-radius.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pradius"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: always
+    networks:
+      - backend
+
+  freeradius:
+    image: 2stacks/freeradius
+    container_name: freeradius
+    environment:
+      DB_HOST: mysql
+      DB_NAME: radius
+      DB_USER: radius
+      DB_PASS: radpass         # ← match MySQL user password
+      RAD_DEBUG: "yes"
+      RAD_CLIENTS: 192.168.0.9
+      RADIUS_KEY: telecom 
+      
+    # uncomment if you need to reach RADIUS from the host:
+    ports:
+       - "1812:1812/udp"
+       - "1813:1813/udp"
+       - "4325:4325/udp"
+
+    restart: always
+    networks:
+      - backend
+
+  php:
+    build: ./web
+    container_name: php_web
+    restart: always
+    depends_on:
+      - mysql
+    ports:
+      - "8080:80"
+    volumes:
+      - ./web:/var/www/html
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: radius
+      MYSQL_PASSWORD: radpass  
+      MYSQL_DATABASE: radius
+    networks:
+      - backend
+
+networks:
+  backend: {}
+
+volumes:
+  mysql_data:

@@ -1,0 +1,11 @@
+# ./php-web/Dockerfile
+FROM php:8.2-apache
+
+# Install required PHP extensions for MySQL
+RUN docker-php-ext-install mysqli pdo pdo_mysql
+
+# Copy your PHP/HTML files into the web server root
+COPY ./principal.php  /var/www/html/
+
+# Expose port 80 (Apache)
+EXPOSE 80

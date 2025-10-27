@@ -40,12 +40,16 @@ if [ ! -f dh ]; then
   fi
 fi
 
+# Get the password once to avoid repetition
+SERVER_PASS=`grep output_password server.cnf | sed 's/.*=//;s/^ *//'`
+CA_PASS=`grep output_password ca.cnf | sed 's/.*=//;s/^ *//'`
+
 if [ ! -f server.key ]; then
-  openssl req -new  -out server.csr -keyout server.key -config ./server.cnf || exit 1
+  openssl req -new -out server.csr -keyout server.key -config ./server.cnf || exit 1
 fi
 
 if [ ! -f ca.key ]; then
-  openssl req -new -x509 -keyout ca.key -out ca.pem -days `grep default_days ca.cnf | sed 's/.*=//;s/^ *//'` -config ./ca.cnf || exit 1
+  openssl req -new -x509 -keyout ca.key -out ca.pem -days 3650 -config ./ca.cnf || exit 1
 fi
 
 if [ ! -f index.txt ]; then
@@ -57,15 +61,15 @@ if [ ! -f serial ]; then
 fi
 
 if [ ! -f server.crt ]; then
-  openssl ca -batch -keyfile ca.key -cert ca.pem -in server.csr  -key `grep output_password ca.cnf | sed 's/.*=//;s/^ *//'` -out server.crt -extensions xpserver_ext -extfile xpextensions -config ./server.cnf || exit 1
+  openssl ca -batch -keyfile ca.key -cert ca.pem -in server.csr -key "$CA_PASS" -out server.crt -extensions xpserver_ext -extfile xpextensions -config ./server.cnf || exit 1
 fi
 
 if [ ! -f server.p12 ]; then
-  openssl pkcs12 -export -in server.crt -inkey server.key -out server.p12  -passin pass:`grep output_password server.cnf | sed 's/.*=//;s/^ *//'` -passout pass:`grep output_password server.cnf | sed 's/.*=//;s/^ *//'` || exit 1
+  openssl pkcs12 -export -in server.crt -inkey server.key -out server.p12 -passin pass:"$SERVER_PASS" -passout pass:"$SERVER_PASS" -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg SHA1 || exit 1
 fi
 
 if [ ! -f server.pem ]; then
-  openssl pkcs12 -in server.p12 -out server.pem -passin pass:`grep output_password server.cnf | sed 's/.*=//;s/^ *//'` -passout pass:`grep output_password server.cnf | sed 's/.*=//;s/^ *//'` || exit 1
+  openssl pkcs12 -in server.p12 -out server.pem -passin pass:"$SERVER_PASS" -passout pass:"$SERVER_PASS" -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg SHA1 || exit 1
   openssl verify -CAfile ca.pem server.pem || exit 1
 fi
 
@@ -74,9 +78,9 @@ if [ ! -f ca.der ]; then
 fi
 
 if [ ! -f client.key ]; then
-  openssl req -new  -out client.csr -keyout client.key -config ./client.cnf
+  openssl req -new -out client.csr -keyout client.key -config ./client.cnf
 fi
 
 if [ ! -f client.crt ]; then
-  openssl ca -batch -keyfile ca.key -cert ca.pem -in client.csr  -key `grep output_password ca.cnf | sed 's/.*=//;s/^ *//'` -out client.crt -extensions xpclient_ext -extfile xpextensions -config ./client.cnf
+  openssl ca -batch -keyfile ca.key -cert ca.pem -in client.csr -key "$CA_PASS" -out client.crt -extensions xpclient_ext -extfile xpextensions -config ./client.cnf
 fi
