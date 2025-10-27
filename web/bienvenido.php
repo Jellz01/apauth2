@@ -48,8 +48,11 @@ detailed_log("CoA Secret: $coa_secret");
 // ----------------------------
 // 📡 Send CoA if MAC exists
 // ----------------------------
-if (!empty($mac) && !isset($_SESSION['coa_executed'])) {
-    detailed_log("✓ MAC no vacía y CoA no ejecutado previamente");
+// FORZAR NUEVO CoA (eliminar marca de ejecución previa para testing)
+unset($_SESSION['coa_executed']);
+
+if (!empty($mac)) {
+    detailed_log("✓ MAC no vacía, procediendo con CoA...");
     
     $mac_cleaned = preg_replace('/[^A-Fa-f0-9:]/', '', $mac);
     detailed_log("✓ MAC limpiado: $mac_cleaned (original: $mac)");
