@@ -1,5 +1,5 @@
 <?php
-// bienvenido.php - RECIBE MAC Y IP DE SESIÓN
+// bienvenido.php - RECIBE MAC Y IP DE SESIÓN CON LOGGING DETALLADO
 
 // Iniciar sesión ANTES de cualquier output
 session_start();
@@ -8,8 +8,27 @@ session_start();
 // 🔧 Configuration for CoA
 // ----------------------------
 $ap_ip = '192.168.0.9';   // Aruba AP IP
-$coa_port = 4325;          // CoA port (RFC 3576)
-$coa_secret = 'telecom';   // Must match your clients.conf coa secret
+$coa_port = 4325;         // CoA port (RFC 3576) - PUERTO CORRECTO
+$coa_secret = 'telecom';  // Must match your clients.conf coa secret
+
+// Crear archivo de log detallado
+$log_file = '/tmp/coa_debug_' . date('Y-m-d_H-i-s') . '.log';
+$php_error_log = ini_get('error_log');
+
+function detailed_log($message) {
+    global $log_file, $php_error_log;
+    $timestamp = date('Y-m-d H:i:s');
+    $full_message = "[$timestamp] $message\n";
+    
+    // Log a archivo de depuración
+    file_put_contents($log_file, $full_message, FILE_APPEND);
+    
+    // Log a error_log de PHP
+    error_log($full_message);
+    
+    // Log a stdout (Docker)
+    echo "<!-- DEBUG: $message -->\n";
+}
 
 // ----------------------------
 // 📥 Get MAC and IP from SESSION
@@ -19,50 +38,123 @@ $ip = isset($_SESSION['registration_ip']) ? trim($_SESSION['registration_ip']) :
 $coa_sent = false;
 $coa_message = '';
 
-error_log("🎯 BIENVENIDO.PHP - MAC de sesión: $mac, IP: $ip");
+detailed_log("=== INICIO BIENVENIDO.PHP ===");
+detailed_log("MAC de sesión: $mac");
+detailed_log("IP de sesión: $ip");
+detailed_log("AP IP: $ap_ip");
+detailed_log("CoA Puerto: $coa_port");
+detailed_log("CoA Secret: $coa_secret");
 
 // ----------------------------
 // 📡 Send CoA if MAC exists
 // ----------------------------
 if (!empty($mac) && !isset($_SESSION['coa_executed'])) {
-    error_log("🔥 ENVIANDO CoA PARA MAC: $mac");
+    detailed_log("✓ MAC no vacía y CoA no ejecutado previamente");
     
-    $mac = preg_replace('/[^A-Fa-f0-9:]/', '', $mac);
-
-    $attributes = "User-Name=$mac\nAcct-Session-Id=coa-reauth-" . time();
+    $mac_cleaned = preg_replace('/[^A-Fa-f0-9:]/', '', $mac);
+    detailed_log("✓ MAC limpiado: $mac_cleaned (original: $mac)");
+    
+    // Crear atributos RADIUS
+    $attributes = "User-Name=$mac_cleaned\nAcct-Session-Id=coa-reauth-" . time();
+    detailed_log("✓ Atributos RADIUS creados:\n$attributes");
+    
+    // Crear archivo temporal
     $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
-    file_put_contents($tmpFile, $attributes);
-
+    detailed_log("✓ Archivo temporal creado: $tmpFile");
+    
+    // Escribir atributos en archivo
+    $bytes_written = file_put_contents($tmpFile, $attributes);
+    detailed_log("✓ Bytes escritos en archivo temporal: $bytes_written");
+    
+    // Leer contenido para verificar
+    $file_content = file_get_contents($tmpFile);
+    detailed_log("✓ Contenido del archivo temporal:\n$file_content");
+    
+    // Verificar que radclient existe
+    $radclient_check = shell_exec('which radclient 2>&1');
+    detailed_log("✓ radclient ubicación: " . trim($radclient_check));
+    
+    // Verificar conectividad al AP
+    detailed_log("✓ Verificando conectividad al AP $ap_ip:$coa_port...");
+    $nc_check = shell_exec("nc -zv $ap_ip $coa_port 2>&1");
+    detailed_log("✓ Resultado nc: " . trim($nc_check));
+    
+    // Construir comando CoA
     $command = sprintf(
-        'cat %s | radclient -x %s:%d coa %s 2>&1',
+        'cat %s | radclient -r 2 -t 3 -x %s:%d coa %s 2>&1',
         escapeshellarg($tmpFile),
         escapeshellarg($ap_ip),
         $coa_port,
         escapeshellarg($coa_secret)
     );
     
-    error_log("🖥️ COMANDO CoA: $command");
+    detailed_log("✓ Comando CoA construido:");
+    detailed_log("  $command");
     
+    // Ejecutar comando CoA
+    detailed_log("🔥 EJECUTANDO CoA...");
     $output = [];
+    $return_var = 0;
     exec($command, $output, $return_var);
+    
+    detailed_log("✓ Comando ejecutado con código de retorno: $return_var");
+    detailed_log("✓ Output del comando (" . count($output) . " líneas):");
+    foreach ($output as $idx => $line) {
+        detailed_log("  [$idx] $line");
+    }
+    
+    // Analizar respuesta
+    $coa_output = implode(" | ", $output);
+    detailed_log("✓ Output combinado: $coa_output");
+    
+    // Validar respuestas
+    if ($return_var === 0) {
+        detailed_log("✓ Código de retorno 0 (éxito)");
+        
+        if (strpos($coa_output, "Received Disconnect-ACK") !== false) {
+            detailed_log("✓ Respuesta contiene: Received Disconnect-ACK");
+            $coa_sent = true;
+        } elseif (strpos($coa_output, "Received CoA-ACK") !== false) {
+            detailed_log("✓ Respuesta contiene: Received CoA-ACK");
+            $coa_sent = true;
+        } else {
+            detailed_log("⚠️ Código 0 pero respuesta inesperada");
+            $coa_sent = true;
+        }
+    } else {
+        detailed_log("❌ Código de retorno: $return_var (ERROR)");
+        $coa_sent = false;
+    }
+    
+    // Eliminar archivo temporal
     unlink($tmpFile);
-
-    $coa_sent = ($return_var === 0);
+    detailed_log("✓ Archivo temporal eliminado: $tmpFile");
+    
+    // Establecer mensaje
     $coa_message = $coa_sent
         ? '✅ CoA enviado exitosamente - Conectándote...'
-        : '⚠️ Error enviando CoA: ' . implode("\n", $output);
+        : '⚠️ Error enviando CoA: ' . htmlspecialchars($coa_output);
     
-    error_log("📋 OUTPUT CoA: $coa_message");
+    detailed_log("✓ Estado final CoA: " . ($coa_sent ? 'ÉXITO' : 'FALLO'));
+    detailed_log("✓ Mensaje: $coa_message");
     
     // Marcar CoA como ejecutado
     $_SESSION['coa_executed'] = true;
+    detailed_log("✓ Sesión marcada como coa_executed");
+    
 } elseif (!empty($mac) && isset($_SESSION['coa_executed'])) {
+    detailed_log("ℹ️ CoA ya fue ejecutado previamente");
     $coa_sent = true;
     $coa_message = '✅ Ya conectado - Disfrutando de GoNet Wi-Fi';
-    error_log("ℹ️ CoA ya fue ejecutado previamente");
 } else {
-    error_log("⚠️ No hay MAC en sesión");
+    detailed_log("❌ No hay MAC en sesión o está vacía");
+    $coa_sent = false;
+    $coa_message = '⚠️ No hay información de dispositivo';
 }
+
+detailed_log("=== FIN LÓGICA CoA ===");
+detailed_log("Archivo de log: $log_file");
+detailed_log("Error log PHP: $php_error_log");
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -192,6 +284,20 @@ if (!empty($mac) && !isset($_SESSION['coa_executed'])) {
                 transform: scale(1);
             }
         }
+
+        .debug-info {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            max-width: 500px;
+            text-align: left;
+            font-size: 0.8rem;
+            font-family: monospace;
+            border: 1px solid #ddd;
+            max-height: 300px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -217,6 +323,15 @@ if (!empty($mac) && !isset($_SESSION['coa_executed'])) {
                     <code><?php echo htmlspecialchars($ip); ?></code>
                 </div>
             <?php endif; ?>
+            
+            <div class="debug-info">
+                <strong>📋 Información de Debug:</strong><br>
+                Archivo de log: <?php echo htmlspecialchars($log_file); ?><br>
+                Error log PHP: <?php echo htmlspecialchars($php_error_log); ?><br>
+                Puerto CoA: <?php echo $coa_port; ?><br>
+                AP: <?php echo htmlspecialchars($ap_ip); ?><br>
+                Estado: <?php echo $coa_sent ? 'ENVIADO ✓' : 'FALLIDO ✗'; ?>
+            </div>
         </div>
     <?php else: ?>
         <div class="coa-status warning">
