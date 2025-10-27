@@ -214,4 +214,18 @@ if (!empty($mac) && !isset($_SESSION['coa_executed'])) {
             <?php if (!empty($ip)): ?>
                 <div class="mac">
                     <strong>🌐 Dirección IP:</strong>
-                    <code><?php echo html
+                    <code><?php echo htmlspecialchars($ip); ?></code>
+                </div>
+            <?php endif; ?>
+        </div>
+    <?php else: ?>
+        <div class="coa-status warning">
+            ⚠️ No se detectó ninguna dirección MAC.<br>
+            <small style="font-size: 0.85rem; margin-top: 10px; display: block;">
+                Intenta recargar la página o conéctate a la red Wi-Fi nuevamente.
+            </small>
+        </div>
+    <?php endif; ?>
+
+</body>
+</html>
