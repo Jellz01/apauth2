@@ -1,5 +1,5 @@
 <?php
-// register_client.php - VERSIÓN SIMPLIFICADA SIN GUARDAR TÉRMINOS EN BD
+// register_client.php - VERSIÓN SIMPLIFICADA
 
 // ----------------------------
 // 🐛 HABILITAR DEBUGGING
@@ -24,41 +24,42 @@ function normalize_mac($mac_raw) {
     return strtoupper($hex);
 }
 
-function safe_url_improved($u) {
-    $u = trim((string)$u);
+function redirect_to_bienvenido() {
+    error_log("🎯 REDIRIGIENDO A BIENVENIDO.HTML");
     
-    // Si está vacío o no es una URL válida, usar bienvenido.html
-    if ($u === '' || filter_var($u, FILTER_VALIDATE_URL) === false) {
-        error_log("🔄 URL INVALID OR EMPTY, DEFAULTING TO BIENVENIDO");
-        return 'bienvenido.html';
+    $bienvenido_url = 'bienvenido.html';
+    
+    // Verificar si el archivo existe
+    if (!file_exists($bienvenido_url)) {
+        error_log("⚠️ bienvenido.html no existe, creando página temporal");
+        echo '<!DOCTYPE html>
+        <html>
+        <head><title>¡Bienvenido!</title></head>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+            <h1>¡Bienvenido a GoNet Wi-Fi!</h1>
+            <p>✅ Registro exitoso. Ya tienes acceso a Internet.</p>
+            <p><a href="https://www.google.com">Continuar navegando</a></p>
+        </body>
+        </html>';
+        exit;
     }
     
-    return $u;
-}
-
-function redirect_or_welcome($url) {
-    $url = safe_url_improved($url);
-    
-    error_log("🎯 REDIRIGIENDO A: " . $url);
-    
     if (!headers_sent()) {
-        header("Location: " . $url);
-        header("Cache-Control: no-cache, no-store, must-revalidate");
-        header("Pragma: no-cache");
-        header("Expires: 0");
+        header("Location: " . $bienvenido_url);
+        exit;
     } else {
         echo '<!DOCTYPE html>
         <html>
         <head>
-            <meta http-equiv="refresh" content="0;url=' . htmlspecialchars($url) . '">
+            <meta http-equiv="refresh" content="0;url=' . $bienvenido_url . '">
         </head>
         <body>
-            <p>Redireccionando... <a href="' . htmlspecialchars($url) . '">Click aquí si no redirige</a></p>
-            <script>window.location.href = "' . addslashes($url) . '";</script>
+            <p>Redireccionando... <a href="' . $bienvenido_url . '">Click aquí</a></p>
+            <script>window.location.href = "' . $bienvenido_url . '";</script>
         </body>
         </html>';
+        exit;
     }
-    exit;
 }
 
 // ----------------------------
@@ -67,19 +68,17 @@ function redirect_or_welcome($url) {
 function execute_coa($mac, $ip) {
     error_log("🔥 EJECUTANDO CoA PARA MAC: $mac, IP: $ip");
     
-    // Método 1: Usar radclient para CoA
     $secret = "testing123";
     $coa_command = "echo 'User-Name=$mac' | radclient -x $ip:3799 disconnect $secret 2>&1";
     
     $output = shell_exec($coa_command);
     error_log("📋 OUTPUT CoA: " . $output);
     
-    // Verificar si CoA fue exitoso
     if (strpos($output, "Received Disconnect-ACK") !== false) {
-        error_log("✅ CoA EXITOSO - Disconnect-ACK recibido");
+        error_log("✅ CoA EXITOSO");
         return true;
     } else {
-        error_log("❌ CoA FALLIDO - No se recibió ACK");
+        error_log("❌ CoA FALLIDO");
         return false;
     }
 }
@@ -107,15 +106,6 @@ $essid    = $_GET['essid']  ?? '';
 $mac_norm = normalize_mac($mac_raw);
 $ap_norm  = normalize_mac($ap_raw);
 $ip       = trim($ip_raw);
-$url_in   = $url_raw;
-
-// Debug de parámetros
-error_log("🔗 PARÁMETROS RECIBIDOS:");
-error_log("   - MAC: $mac_norm");
-error_log("   - IP: $ip");
-error_log("   - URL: $url_in");
-error_log("   - AP: $ap_norm");
-error_log("   - ESSID: $essid");
 
 // ----------------------------
 // 📥 Process Form Submission
@@ -132,16 +122,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $mac_post  = $_POST['mac'] ?? '';
     $ip_post   = $_POST['ip']  ?? '';
-    $url_post  = $_POST['url'] ?? '';
 
     $mac_norm  = normalize_mac($mac_post);
     $ip        = trim($ip_post);
-    $url_in    = $url_post;
 
     error_log("📝 DATOS FORMULARIO:");
-    error_log("   Nombre: $nombre, MAC: $mac_norm, IP: $ip, URL: $url_in, Términos: $terminos");
+    error_log("   Nombre: $nombre, MAC: $mac_norm, IP: $ip");
 
-    // Validar términos y condiciones (SOLO VALIDACIÓN, NO SE GUARDA EN BD)
+    // Validar términos y condiciones
     if (!$terminos) {
         error_log("❌ Términos y condiciones no aceptados");
         die("<div class='error'>❌ Debes aceptar los términos y condiciones para registrarte.</div>");
@@ -172,17 +160,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, ejecutando CoA...");
             
-            // Ejecutar CoA y redirigir
+            // Ejecutar CoA
             execute_coa($mac_norm, $ip);
             
-            // Debug antes de redirigir
-            error_log("🎯 PRE-REDIRECCIÓN - URL: $url_in");
-            redirect_or_welcome($url_in);
+            // REDIRIGIR A BIENVENIDO
+            redirect_to_bienvenido();
         }
         $check_radcheck->close();
 
         // 2) INSERT INTO clients (MAC no existe en radcheck)
-        // SOLO insertamos datos básicos, sin campo de términos
         $stmt_clients = $conn->prepare("
             INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
             VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -211,15 +197,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         error_log("🎉 REGISTRO COMPLETADO, EJECUTANDO CoA...");
         execute_coa($mac_norm, $ip);
         
-        // 5) Redirigir con debug extensivo
-        error_log("🔄 REDIRIGIENDO A: $url_in");
-        error_log("🎯 ESTADO FINAL:");
-        error_log("   - MAC: $mac_norm");
-        error_log("   - IP: $ip");
-        error_log("   - URL: $url_in");
-        error_log("   - Headers sent: " . (headers_sent() ? 'YES' : 'NO'));
-        
-        redirect_or_welcome($url_in);
+        // 5) REDIRIGIR A BIENVENIDO SIEMPRE
+        error_log("🔄 REDIRIGIENDO A BIENVENIDO.HTML");
+        redirect_to_bienvenido();
 
     } catch (Exception $e) {
         error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
@@ -228,11 +208,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             error_log("🔄 TRANSACCIÓN REVERTIDA");
         }
         
-        // Si es error de duplicado, probablemente ya existe
+        // Si es error de duplicado, ejecutar CoA y redirigir igual
         if ($conn->errno == 1062) {
             error_log("⚠️ MAC $mac_norm YA EXISTE (error 1062), ejecutando CoA...");
             execute_coa($mac_norm, $ip);
-            redirect_or_welcome($url_in);
+            redirect_to_bienvenido();
         } else {
             die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . "</div>");
         }
@@ -471,16 +451,6 @@ if ($mac_norm !== '') {
             text-decoration: underline;
         }
         
-        .debug-info {
-            background: #f0f0f0;
-            padding: 10px;
-            border-radius: 8px;
-            margin: 10px 0;
-            font-size: 0.8rem;
-            color: #666;
-            border-left: 4px solid #999;
-        }
-        
         @media (max-width: 480px) {
             .form-container { 
                 padding: 25px 20px; 
@@ -526,14 +496,6 @@ if ($mac_norm !== '') {
             </div>
         <?php endif; ?>
 
-        <!-- Debug info (opcional - puedes eliminar esto en producción) -->
-        <div class="debug-info">
-            <strong>Info de Conexión:</strong><br>
-            MAC: <?php echo htmlspecialchars($mac_norm); ?><br>
-            IP: <?php echo htmlspecialchars($ip); ?><br>
-            URL: <?php echo htmlspecialchars($url_in); ?>
-        </div>
-
         <form method="POST" autocomplete="on" id="registrationForm">
             <div class="form-group">
                 <label class="required">Nombre</label>
@@ -560,7 +522,7 @@ if ($mac_norm !== '') {
                 <input type="email" name="email" placeholder="correo@ejemplo.com" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
             </div>
 
-            <!-- Términos y Condiciones - SOLO VALIDACIÓN EN FRONTEND -->
+            <!-- Términos y Condiciones -->
             <div class="terminos-container">
                 <div class="terminos-checkbox">
                     <input type="checkbox" name="terminos" id="terminos" required>
@@ -575,7 +537,6 @@ if ($mac_norm !== '') {
             <!-- Hidden fields -->
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
-            <input type="hidden" name="url" value="<?php echo htmlspecialchars($url_in); ?>">
 
             <!-- Device Information -->
             <?php if ($mac_norm !== ''): ?>
