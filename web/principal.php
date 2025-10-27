@@ -28,7 +28,7 @@ function normalize_mac($mac_raw) {
 function redirect_to_bienvenido() {
     error_log("🎯 REDIRIGIENDO A BIENVENIDO.HTML");
     
-    $bienvenido_url = 'bienvenido.html';
+    $bienvenido_url = 'bienvenido.php';
     
     if (!headers_sent()) {
         header("Location: " . $bienvenido_url);
