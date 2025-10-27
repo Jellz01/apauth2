@@ -49,7 +49,7 @@ function redirect_to_bienvenido() {
 }
 
 // ----------------------------
-// 🔥 FUNCIÓN CoA SIMPLIFICADA Y CORREGIDA
+// 🔥 FUNCIÓN CoA
 // ----------------------------
 function execute_coa($mac, $ap_ip) {
     error_log("🔥 EJECUTANDO CoA PARA MAC: $mac, IP AP: $ap_ip");
@@ -57,13 +57,11 @@ function execute_coa($mac, $ap_ip) {
     $coa_secret = "telecom";
     $coa_port = "4325";
     
-    // Validar parámetros
     if (empty($mac) || empty($ap_ip)) {
         error_log("❌ PARÁMETROS FALTANTES PARA CoA");
         return false;
     }
     
-    // Comando CoA simplificado
     $command = sprintf(
         'echo "User-Name=%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s 2>&1',
         escapeshellarg($mac),
@@ -74,16 +72,13 @@ function execute_coa($mac, $ap_ip) {
     
     error_log("🖥️ COMANDO CoA: $command");
     
-    // Ejecutar y capturar output
     $output = [];
     $return_var = 0;
     exec($command, $output, $return_var);
     
-    // Convertir array a string para logging
     $coa_output = implode(" | ", $output);
     error_log("📋 OUTPUT CoA: " . $coa_output);
     
-    // Verificar si CoA fue exitoso
     $coa_success = false;
     if ($return_var === 0) {
         if (strpos($coa_output, "Received Disconnect-ACK") !== false) {
@@ -94,15 +89,11 @@ function execute_coa($mac, $ap_ip) {
             $coa_success = true;
         } else {
             error_log("⚠️ CoA EJECUTADO pero respuesta no esperada");
-            $coa_success = true; // Aún así consideramos éxito
+            $coa_success = true;
         }
     } else {
         error_log("❌ ERROR EN CoA - Código: $return_var");
     }
-    
-    // Mensaje simple sin usar implode en contexto incorrecto
-    $coa_message = $coa_success ? '✅ CoA enviado exitosamente' : '⚠️ Error enviando CoA';
-    error_log("📊 RESULTADO: $coa_message");
     
     return $coa_success;
 }
@@ -149,7 +140,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = $_POST['email']    ?? '';
     $terminos = isset($_POST['terminos']) ? 1 : 0;
 
-    // Obtener MAC e IP del formulario
     $mac_post  = $_POST['mac'] ?? '';
     $ip_post   = $_POST['ip']  ?? '';
 
@@ -183,26 +173,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $check_radcheck->store_result();
 
         if ($check_radcheck->num_rows > 0) {
-            // ✅ MAC YA EXISTE EN RADCHECK - Solo ejecutar CoA y redirigir
             $check_radcheck->close();
             $conn->commit();
             
             error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, ejecutando CoA...");
             
-            // Ejecutar CoA
             execute_coa($mac_norm, $ip);
-            
-            // REDIRIGIR A BIENVENIDO
             redirect_to_bienvenido();
         }
         $check_radcheck->close();
 
-        // 2) INSERT INTO clients (MAC no existe en radcheck)
+        // 2) INSERT INTO clients - CORREGIDO: "ssssss" en lugar de "sssssi"
         $stmt_clients = $conn->prepare("
             INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
             VALUES (?, ?, ?, ?, ?, ?, 1)
         ");
-        $stmt_clients->bind_param("sssssi", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
+        // CORRECCIÓN: Todos son strings, usar "ssssss"
+        $stmt_clients->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
         $stmt_clients->execute();
         $client_id = $conn->insert_id;
         $stmt_clients->close();
@@ -222,33 +209,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $conn->commit();
         error_log("✅ TRANSACCIÓN BD COMPLETADA");
         
-        // 4) 🔥 EJECUTAR CoA después del registro exitoso
+        // 4) EJECUTAR CoA
         error_log("🎉 REGISTRO COMPLETADO, EJECUTANDO CoA...");
         execute_coa($mac_norm, $ip);
         
-        // 5) REDIRIGIR A BIENVENIDO SIEMPRE
+        // 5) REDIRIGIR
         error_log("🔄 REDIRIGIENDO A BIENVENIDO.HTML");
         redirect_to_bienvenido();
 
     } catch (Exception $e) {
         error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
+        error_log("❌ CÓDIGO ERROR: " . $conn->errno);
+        error_log("❌ MENSAJE ERROR: " . $conn->error);
+        
         if ($conn->errno) {
             $conn->rollback();
             error_log("🔄 TRANSACCIÓN REVERTIDA");
         }
         
-        // Si es error de duplicado, ejecutar CoA y redirigir igual
         if ($conn->errno == 1062) {
             error_log("⚠️ MAC $mac_norm YA EXISTE (error 1062), ejecutando CoA...");
             execute_coa($mac_norm, $ip);
             redirect_to_bienvenido();
         } else {
-            die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . "</div>");
+            die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
         }
     }
 }
 
-// Verificar estado actual de la MAC para mostrar en el formulario
+// Verificar estado actual de la MAC
 $mac_status = 'new';
 $client_exists = false;
 if ($mac_norm !== '') {
@@ -279,9 +268,12 @@ if ($mac_norm !== '') {
         $check_clients_display->close();
         
     } catch (Exception $e) {
-        // Silently continue
+        error_log("⚠️ Error verificando estado: " . $e->getMessage());
     }
 }
+
+// Debug final
+error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exists: " . ($client_exists ? 'YES' : 'NO'));
 ?>
 
 <!DOCTYPE html>
@@ -291,213 +283,34 @@ if ($mac_norm !== '') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Registro Wi-Fi - GoNet</title>
     <style>
-        * { 
-            box-sizing: border-box; 
-            margin: 0; 
-            padding: 0; 
-        }
-        
-        body {
-            font-family: 'Arial', sans-serif; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex; 
-            flex-direction: column;
-            align-items: center; 
-            justify-content: center; 
-            min-height: 100vh; 
-            padding: 20px;
-            color: #333;
-        }
-        
-        .top-image, .bottom-image { 
-            width: 100%; 
-            max-width: 400px; 
-            border-radius: 15px;
-            margin: 10px 0;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-        }
-        
-        .form-container {
-            background: white; 
-            padding: 30px 25px; 
-            border-radius: 20px; 
-            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
-            width: 100%; 
-            max-width: 450px; 
-            margin: 20px 0;
-        }
-        
-        h2 { 
-            color: #2c3e50; 
-            text-align: center; 
-            margin-bottom: 25px; 
-            font-size: 1.8rem;
-            font-weight: 600;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        input {
-            width: 100%; 
-            padding: 15px; 
-            margin: 8px 0; 
-            border: 2px solid #e1e8ed; 
-            border-radius: 12px; 
-            font-size: 1rem;
-            transition: all 0.3s ease;
-        }
-        
-        input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        button {
-            width: 100%; 
-            padding: 16px; 
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white; 
-            border: none; 
-            border-radius: 12px;
-            font-size: 1.1rem; 
-            font-weight: 600;
-            cursor: pointer; 
-            margin-top: 15px; 
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
-        
-        button:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-        }
-        
-        .error {
-            background: #ffebee; 
-            color: #c62828; 
-            padding: 12px; 
-            border-radius: 10px; 
-            margin: 15px 0;
-            text-align: center; 
-            font-size: 0.9rem; 
-            border-left: 4px solid #c62828;
-        }
-        
-        .mac-display {
-            background: #f8f9fa; 
-            padding: 15px; 
-            border-radius: 12px; 
-            margin: 15px 0; 
-            font-size: 0.95rem;
-            color: #2c3e50; 
-            text-align: center; 
-            word-wrap: break-word;
-            border: 2px solid #e9ecef;
-        }
-        
-        .info-display {
-            background: #e3f2fd; 
-            padding: 12px; 
-            border-radius: 10px; 
-            margin: 10px 0; 
-            font-size: 0.9rem;
-            color: #1565c0; 
-            text-align: center;
-            border-left: 4px solid #2196f3;
-        }
-        
-        .status-info {
-            background: #e8f5e8; 
-            padding: 15px; 
-            border-radius: 10px; 
-            margin: 15px 0; 
-            font-size: 0.95rem;
-            color: #2e7d32; 
-            text-align: center;
-            border-left: 4px solid #4caf50;
-            font-weight: 500;
-        }
-        
-        .warning-info {
-            background: #fff3e0; 
-            padding: 15px; 
-            border-radius: 10px; 
-            margin: 15px 0; 
-            font-size: 0.95rem;
-            color: #ef6c00; 
-            text-align: center;
-            border-left: 4px solid #ff9800;
-        }
-        
-        .required::after {
-            content: " *";
-            color: #e74c3c;
-        }
-        
-        .terminos-container {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-            border: 2px solid #e9ecef;
-        }
-        
-        .terminos-checkbox {
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-            margin: 10px 0;
-        }
-        
-        .terminos-checkbox input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            margin-top: 2px;
-        }
-        
-        .terminos-text {
-            font-size: 0.9rem;
-            color: #555;
-            line-height: 1.4;
-        }
-        
-        .terminos-link {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 500;
-        }
-        
-        .terminos-link:hover {
-            text-decoration: underline;
-        }
-        
-        @media (max-width: 480px) {
-            .form-container { 
-                padding: 25px 20px; 
-                border-radius: 15px; 
-                margin: 15px 0;
-            }
-            
-            input, button { 
-                font-size: 1rem; 
-            }
-            
-            h2 { 
-                font-size: 1.5rem; 
-            }
-            
-            body {
-                padding: 15px;
-            }
-        }
+        /* [TUS ESTILOS ACTUALES - SE MANTIENEN IGUAL] */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Arial', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; color: #333; }
+        .top-image, .bottom-image { width: 100%; max-width: 400px; border-radius: 15px; margin: 10px 0; box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+        .form-container { background: white; padding: 30px 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); width: 100%; max-width: 450px; margin: 20px 0; }
+        h2 { color: #2c3e50; text-align: center; margin-bottom: 25px; font-size: 1.8rem; font-weight: 600; }
+        .form-group { margin-bottom: 20px; }
+        input { width: 100%; padding: 15px; margin: 8px 0; border: 2px solid #e1e8ed; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; }
+        input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
+        button { width: 100%; padding: 16px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-size: 1.1rem; font-weight: 600; cursor: pointer; margin-top: 15px; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); }
+        button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
+        .error { background: #ffebee; color: #c62828; padding: 12px; border-radius: 10px; margin: 15px 0; text-align: center; font-size: 0.9rem; border-left: 4px solid #c62828; }
+        .mac-display { background: #f8f9fa; padding: 15px; border-radius: 12px; margin: 15px 0; font-size: 0.95rem; color: #2c3e50; text-align: center; word-wrap: break-word; border: 2px solid #e9ecef; }
+        .info-display { background: #e3f2fd; padding: 12px; border-radius: 10px; margin: 10px 0; font-size: 0.9rem; color: #1565c0; text-align: center; border-left: 4px solid #2196f3; }
+        .status-info { background: #e8f5e8; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 0.95rem; color: #2e7d32; text-align: center; border-left: 4px solid #4caf50; font-weight: 500; }
+        .warning-info { background: #fff3e0; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 0.95rem; color: #ef6c00; text-align: center; border-left: 4px solid #ff9800; }
+        .required::after { content: " *"; color: #e74c3c; }
+        .terminos-container { background: #f8f9fa; padding: 15px; border-radius: 10px; margin: 15px 0; border: 2px solid #e9ecef; }
+        .terminos-checkbox { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; }
+        .terminos-checkbox input[type="checkbox"] { width: 20px; height: 20px; margin-top: 2px; }
+        .terminos-text { font-size: 0.9rem; color: #555; line-height: 1.4; }
+        .terminos-link { color: #667eea; text-decoration: none; font-weight: 500; }
+        .terminos-link:hover { text-decoration: underline; }
+        @media (max-width: 480px) { .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; } input, button { font-size: 1rem; } h2 { font-size: 1.5rem; } body { padding: 15px; } }
     </style>
 </head>
 <body>
 
-    <!-- Top banner -->
     <img src="gonetlogo.png" alt="GoNet Logo" class="top-image">
 
     <div class="form-container">
@@ -551,7 +364,6 @@ if ($mac_norm !== '') {
                 <input type="email" name="email" placeholder="correo@ejemplo.com" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
             </div>
 
-            <!-- Términos y Condiciones -->
             <div class="terminos-container">
                 <div class="terminos-checkbox">
                     <input type="checkbox" name="terminos" id="terminos" required>
@@ -563,11 +375,9 @@ if ($mac_norm !== '') {
                 </div>
             </div>
 
-            <!-- Hidden fields -->
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
 
-            <!-- Device Information -->
             <div class="mac-display">
                 <strong>🔧 Dispositivo MAC:</strong><br>
                 <code><?php echo htmlspecialchars($mac_norm); ?></code>
@@ -586,7 +396,6 @@ if ($mac_norm !== '') {
         <?php endif; ?>
     </div>
 
-    <!-- Bottom banner -->
     <img src="banner.png" alt="Banner" class="bottom-image">
 
     <script>

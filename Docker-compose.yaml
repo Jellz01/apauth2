@@ -38,7 +38,8 @@ services:
     ports:
        - "1812:1812/udp"
        - "1813:1813/udp"
-       
+       - "4325:4325/udp"
+
     restart: always
     networks:
       - backend
