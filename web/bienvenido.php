@@ -8,7 +8,7 @@ session_start();
 // 🔧 Configuration for CoA
 // ----------------------------
 $ap_ip = '192.168.0.9';   // Aruba AP IP
-$coa_port = 3799;          // CoA port (RFC 3576)
+$coa_port = 4325;          // CoA port (RFC 3576)
 $coa_secret = 'telecom';   // Must match your clients.conf coa secret
 
 // ----------------------------
