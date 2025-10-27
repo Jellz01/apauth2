@@ -15,9 +15,9 @@ LABEL net.2stacks.name="2stacks" \
 
 
 
-RUN apk --update add freeradius freeradius-mysql  freeradius-utils freeradius-eap openssl
+RUN apk --update add freeradius freeradius-mysql  freeradius-utils freeradius-eap  netcat-openbsd openssl
 
-EXPOSE 1812/udp 1813/udp
+EXPOSE 1812/udp 1813/udp 4325/udp
 
 ENV DB_HOST=localhost
 ENV DB_PORT=3306
