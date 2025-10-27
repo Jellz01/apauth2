@@ -45,11 +45,17 @@ if (!empty($mac)) {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>GoNet WiFi</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoNet WiFi - Bienvenido</title>
     <style>
-        body {
+        * {
             margin: 0;
-            background-color: #ffffff;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             font-family: Arial, sans-serif;
             display: flex;
             flex-direction: column;
@@ -57,17 +63,58 @@ if (!empty($mac)) {
             align-items: center;
             height: 100vh;
             text-align: center;
+            padding: 20px;
         }
+        
         .logo {
             width: 250px;
             max-width: 80%;
             margin-bottom: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        .coa-status {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            max-width: 400px;
+            width: 100%;
+            font-size: 1.1rem;
+            color: #2c3e50;
+        }
+        
+        .coa-status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 5px solid #4caf50;
+        }
+        
+        .coa-status.error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 5px solid #f44336;
+        }
+        
+        .coa-status.warning {
+            background: #fff3e0;
+            color: #ef6c00;
+            border-left: 5px solid #ff9800;
         }
         
         .mac {
             font-size: 0.9rem;
-            color: #555;
-            margin-top: 8px;
+            color: inherit;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            word-break: break-all;
+        }
+        
+        .mac strong {
+            display: block;
+            margin-bottom: 5px;
         }
     </style>
 </head>
@@ -75,12 +122,15 @@ if (!empty($mac)) {
     <img src="gonetlogo.png" alt="GoNet Logo" class="logo">
 
     <?php if (!empty($mac)): ?>
-        <div class="coa-status">
-            <?= htmlspecialchars($coa_message) ?>
-            <div class="mac"><strong>MAC:</strong> <?= htmlspecialchars($mac) ?></div>
+        <div class="coa-status <?php echo $coa_sent ? 'success' : 'error'; ?>">
+            <?php echo htmlspecialchars($coa_message); ?>
+            <div class="mac">
+                <strong>🔧 Dispositivo MAC:</strong>
+                <?php echo htmlspecialchars($mac); ?>
+            </div>
         </div>
     <?php else: ?>
-        <div class="coa-status" style="background:#fff3cd;color:#856404;">
+        <div class="coa-status warning">
             ⚠️ No se detectó ninguna dirección MAC.
         </div>
     <?php endif; ?>
