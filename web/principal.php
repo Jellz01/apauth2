@@ -1,5 +1,5 @@
 <?php
-// register_client.php - VERSIÓN CON DEBUG COMPLETO
+// register_client.php - VERSIÓN CORREGIDA
 
 // ----------------------------
 // 🐛 HABILITAR DEBUGGING
@@ -49,15 +49,13 @@ function redirect_to_bienvenido() {
 }
 
 // ----------------------------
-// 🔥 FUNCIÓN CoA CON DEBUG COMPLETO
+// 🔥 FUNCIÓN CoA SIMPLIFICADA Y CORREGIDA
 // ----------------------------
 function execute_coa($mac, $ap_ip) {
-    error_log("🔥 ========== INICIANDO CoA ==========");
-    error_log("🔥 MAC: $mac");
-    error_log("🔥 IP AP: $ap_ip");
+    error_log("🔥 EJECUTANDO CoA PARA MAC: $mac, IP AP: $ap_ip");
     
-    $coa_secret = "testing123";
-    $coa_port = "3799";
+    $coa_secret = "telecom";
+    $coa_port = "4325";
     
     // Validar parámetros
     if (empty($mac) || empty($ap_ip)) {
@@ -65,33 +63,25 @@ function execute_coa($mac, $ap_ip) {
         return false;
     }
     
-    // Crear archivo temporal con el comando CoA
-    $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
-    $coa_packet = "User-Name = \"$mac\"\n";
-    
-    file_put_contents($tmpFile, $coa_packet);
-    error_log("📄 Archivo CoA temporal creado: $tmpFile");
-    error_log("📄 Contenido CoA: $coa_packet");
-    
-    // Ejecutar radclient
+    // Comando CoA simplificado
     $command = sprintf(
-        'echo "User-Name=%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s',
+        'echo "User-Name=%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s 2>&1',
         escapeshellarg($mac),
         escapeshellarg($ap_ip),
         $coa_port,
         escapeshellarg($coa_secret)
     );
     
-    error_log("🖥️  COMANDO CoA EJECUTADO: $command");
+    error_log("🖥️ COMANDO CoA: $command");
     
     // Ejecutar y capturar output
     $output = [];
     $return_var = 0;
-    exec($command . " 2>&1", $output, $return_var);
+    exec($command, $output, $return_var);
     
+    // Convertir array a string para logging
     $coa_output = implode(" | ", $output);
-    error_log("📋 OUTPUT CoA COMPLETO: " . $coa_output);
-    error_log("🔢 CÓDIGO DE RETORNO: $return_var");
+    error_log("📋 OUTPUT CoA: " . $coa_output);
     
     // Verificar si CoA fue exitoso
     $coa_success = false;
@@ -104,18 +94,16 @@ function execute_coa($mac, $ap_ip) {
             $coa_success = true;
         } else {
             error_log("⚠️ CoA EJECUTADO pero respuesta no esperada");
+            $coa_success = true; // Aún así consideramos éxito
         }
     } else {
         error_log("❌ ERROR EN CoA - Código: $return_var");
     }
     
-    // Limpiar archivo temporal si existe
-    if (file_exists($tmpFile)) {
-        unlink($tmpFile);
-        error_log("🧹 Archivo temporal eliminado");
-    }
+    // Mensaje simple sin usar implode en contexto incorrecto
+    $coa_message = $coa_success ? '✅ CoA enviado exitosamente' : '⚠️ Error enviando CoA';
+    error_log("📊 RESULTADO: $coa_message");
     
-    error_log("🔥 ========== FIN CoA ==========");
     return $coa_success;
 }
 
@@ -133,7 +121,7 @@ try {
 }
 
 // ----------------------------
-// 🧾 Get Parameters - CON MÚLTIPLES FUENTES
+// 🧾 Get Parameters
 // ----------------------------
 $mac_raw  = $_GET['mac']    ?? $_POST['mac']    ?? '';
 $ip_raw   = $_GET['ip']     ?? $_POST['ip']     ?? '';
@@ -145,23 +133,14 @@ $mac_norm = normalize_mac($mac_raw);
 $ap_norm  = normalize_mac($ap_raw);
 $ip       = trim($ip_raw);
 
-// Debug completo de parámetros
-error_log("🔍 ========== DEBUG PARÁMETROS ==========");
-error_log("🔍 MAC raw: '$mac_raw'");
-error_log("🔍 MAC normalizada: '$mac_norm'");
-error_log("🔍 IP: '$ip'");
-error_log("🔍 AP MAC: '$ap_norm'");
-error_log("🔍 ESSID: '$essid'");
-error_log("🔍 URL: '$url_raw'");
-error_log("🔍 MÉTODO: " . $_SERVER['REQUEST_METHOD']);
-error_log("🔍 GET: " . print_r($_GET, true));
-error_log("🔍 POST: " . print_r($_POST, true));
+// Debug de parámetros
+error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP: '$ip'");
 
 // ----------------------------
 // 📥 Process Form Submission
 // ----------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    error_log("📨 ========== PROCESANDO FORMULARIO ==========");
+    error_log("📨 PROCESANDO FORMULARIO POST");
     
     $nombre   = $_POST['nombre']   ?? '';
     $apellido = $_POST['apellido'] ?? '';
@@ -170,19 +149,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = $_POST['email']    ?? '';
     $terminos = isset($_POST['terminos']) ? 1 : 0;
 
-    // Obtener MAC e IP del formulario (pueden ser diferentes de los GET)
+    // Obtener MAC e IP del formulario
     $mac_post  = $_POST['mac'] ?? '';
     $ip_post   = $_POST['ip']  ?? '';
 
     $mac_norm  = normalize_mac($mac_post);
     $ip        = trim($ip_post);
 
-    error_log("📝 DATOS FORMULARIO:");
-    error_log("   👤 Nombre: $nombre");
-    error_log("   👤 Apellido: $apellido");
-    error_log("   🔧 MAC: $mac_norm");
-    error_log("   🌐 IP: $ip");
-    error_log("   ✅ Términos: " . ($terminos ? 'ACEPTADOS' : 'NO ACEPTADOS'));
+    error_log("📝 DATOS FORMULARIO: $nombre, MAC: $mac_norm, IP: $ip");
 
     // Validar términos y condiciones
     if (!$terminos) {
@@ -215,11 +189,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, ejecutando CoA...");
             
-            // Ejecutar CoA con la IP del AP
-            $coa_result = execute_coa($mac_norm, $ip);
-            error_log("📊 RESULTADO CoA: " . ($coa_result ? 'EXITOSO' : 'FALLIDO'));
+            // Ejecutar CoA
+            execute_coa($mac_norm, $ip);
             
-            // REDIRIGIR A BIENVENIDO incluso si CoA falla
+            // REDIRIGIR A BIENVENIDO
             redirect_to_bienvenido();
         }
         $check_radcheck->close();
@@ -251,8 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // 4) 🔥 EJECUTAR CoA después del registro exitoso
         error_log("🎉 REGISTRO COMPLETADO, EJECUTANDO CoA...");
-        $coa_result = execute_coa($mac_norm, $ip);
-        error_log("📊 RESULTADO CoA: " . ($coa_result ? 'EXITOSO' : 'FALLIDO'));
+        execute_coa($mac_norm, $ip);
         
         // 5) REDIRIGIR A BIENVENIDO SIEMPRE
         error_log("🔄 REDIRIGIENDO A BIENVENIDO.HTML");
@@ -307,11 +279,9 @@ if ($mac_norm !== '') {
         $check_clients_display->close();
         
     } catch (Exception $e) {
-        error_log("⚠️ Error verificando estado MAC: " . $e->getMessage());
+        // Silently continue
     }
 }
-
-error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exists: " . ($client_exists ? 'YES' : 'NO'));
 ?>
 
 <!DOCTYPE html>
@@ -504,22 +474,6 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
             text-decoration: underline;
         }
         
-        .debug-panel {
-            background: #2c3e50;
-            color: white;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-            font-size: 0.8rem;
-            font-family: monospace;
-        }
-        
-        .debug-title {
-            font-weight: bold;
-            margin-bottom: 10px;
-            color: #3498db;
-        }
-        
         @media (max-width: 480px) {
             .form-container { 
                 padding: 25px 20px; 
@@ -548,15 +502,6 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
 
     <div class="form-container">
         <h2>📡 Registro para Wi-Fi</h2>
-
-        <!-- Panel de Debug (puedes eliminar en producción) -->
-        <div class="debug-panel">
-            <div class="debug-title">🔧 DEBUG INFO</div>
-            <div>MAC: <?php echo htmlspecialchars($mac_norm); ?></div>
-            <div>IP: <?php echo htmlspecialchars($ip); ?></div>
-            <div>Estado: <?php echo $mac_status; ?></div>
-            <div>Cliente existe: <?php echo $client_exists ? 'SÍ' : 'NO'; ?></div>
-        </div>
 
         <?php if ($mac_norm === ''): ?>
             <div class="error">
@@ -618,11 +563,9 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
                 </div>
             </div>
 
-            <!-- Hidden fields - CRÍTICOS para pasar la MAC -->
+            <!-- Hidden fields -->
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
-            <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
-            <input type="hidden" name="essid" value="<?php echo htmlspecialchars($essid); ?>">
 
             <!-- Device Information -->
             <div class="mac-display">
@@ -636,26 +579,10 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
                 </div>
             <?php endif; ?>
 
-            <?php if ($essid !== ''): ?>
-                <div class="info-display">
-                    <strong>📶 Red Wi-Fi:</strong> <?php echo htmlspecialchars($essid); ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($ap_norm !== ''): ?>
-                <div class="info-display">
-                    <strong>📡 Punto de Acceso:</strong> <?php echo htmlspecialchars($ap_norm); ?>
-                </div>
-            <?php endif; ?>
-
             <button type="submit" id="submitBtn">
                 <?php echo $mac_status === 'registered' ? '✅ Conectar Ahora' : '🚀 Registrar y Conectar'; ?>
             </button>
         </form>
-        <?php else: ?>
-            <div class="info-display">
-                🔄 Recarga la página o reconéctate a la red Wi-Fi.
-            </div>
         <?php endif; ?>
     </div>
 
@@ -663,7 +590,6 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
     <img src="banner.png" alt="Banner" class="bottom-image">
 
     <script>
-        // Validación de términos antes de enviar el formulario
         document.getElementById('registrationForm')?.addEventListener('submit', function(e) {
             const terminosCheckbox = document.getElementById('terminos');
             if (!terminosCheckbox.checked) {
@@ -673,17 +599,10 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
                 return false;
             }
             
-            // Mostrar loading en el botón
             const submitBtn = document.getElementById('submitBtn');
             submitBtn.innerHTML = '⏳ Procesando...';
             submitBtn.disabled = true;
         });
-
-        // Guardar MAC en localStorage como backup
-        <?php if ($mac_norm !== ''): ?>
-        localStorage.setItem('client_mac', '<?php echo $mac_norm; ?>');
-        console.log('MAC guardada en localStorage:', '<?php echo $mac_norm; ?>');
-        <?php endif; ?>
     </script>
 
 </body>
