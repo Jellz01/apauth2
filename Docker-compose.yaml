@@ -33,7 +33,8 @@ services:
       RAD_DEBUG: "yes"
       RAD_CLIENTS: 192.168.0.9
       RADIUS_KEY: telecom 
-      
+    volumes:
+      - ./Freeradius/scripts:/docker-entrypoint-initdb.d:ro 
     # uncomment if you need to reach RADIUS from the host:
     ports:
        - "1812:1812/udp"

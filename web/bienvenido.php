@@ -58,13 +58,13 @@ if (!empty($mac)) {
     detailed_log("Contenido: " . file_get_contents($tmpFile));
     
     // ✅ COMANDO CORREGIDO: Enviar al CONTENEDOR FreeRADIUS (172.18.0.2)
-    $command = sprintf(
-        'cat %s | radclient -r 3 -t 5 -x %s:%d disconnect %s 2>&1',
-        escapeshellarg($tmpFile),
-        escapeshellarg($radius_container_ip),  // ✅ IP DEL CONTENEDOR FREERADIUS
-        $coa_port,
-        escapeshellarg($coa_secret)
-    );
+   $command = sprintf(
+    'cat %s | radclient -r 3 -t 5 -x %s:%d disconnect %s 2>&1',
+    escapeshellarg($tmpFile),
+    escapeshellarg($ap_ip),  // ✅ Send to AP!
+    3799,  // Standard CoA port (Aruba uses 3799, not 4325)
+    escapeshellarg($coa_secret)
+);
     
     detailed_log("Ejecutando: $command");
     
