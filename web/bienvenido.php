@@ -1,11 +1,12 @@
 <?php
-// bienvenido.php - VERSIÓN CORREGIDA COA
+// bienvenido.php - CoA con datos de sesión correctos
 session_start();
 
-// ✅ CONFIGURACIÓN CoA - Enviar directamente al AP
-$ap_ip = '192.168.0.9';           // IP del AP Aruba
-$coa_port = 3799;                 // Puerto estándar CoA/DM para Aruba
-$coa_secret = 'telecom';          // Secret compartido con el AP
+// CONFIGURACIÓN
+$ap_ip = '192.168.0.9';
+$coa_port = 3799;
+$coa_secret = 'telecom';
+$radius_db = '/etc/freeradius/3.0/mods-config/sql/main/mysql/radacct'; // Ajustar según tu DB
 
 $log_file = '/tmp/coa_debug.log';
 
@@ -19,112 +20,180 @@ function detailed_log($message) {
 $mac = isset($_SESSION['registration_mac']) ? trim($_SESSION['registration_mac']) : '';
 $ip = isset($_SESSION['registration_ip']) ? trim($_SESSION['registration_ip']) : '';
 
-detailed_log("=== INICIO CoA REQUEST ===");
-detailed_log("AP Destino: $ap_ip:$coa_port");
-detailed_log("MAC: $mac | IP: $ip");
-
-// ✅ Verificar conectividad al AP
-$connectivity = @fsockopen($ap_ip, $coa_port, $errno, $errstr, 2);
-if ($connectivity) {
-    fclose($connectivity);
-    detailed_log("✅ AP alcanzable en $ap_ip:$coa_port");
-} else {
-    detailed_log("❌ AP NO alcanzable: $errstr ($errno)");
-}
-
-// Verificar radclient
-$radclient_path = trim(shell_exec('which radclient 2>&1'));
-detailed_log("radclient: $radclient_path");
+detailed_log("=== INICIO CoA con búsqueda de sesión ===");
 
 if (!empty($mac)) {
-    // Normalizar MAC address
-    $mac_cleaned = strtoupper(preg_replace('/[^A-Fa-f0-9]/', '', $mac));
-    if (strlen($mac_cleaned) == 12) {
-        $mac_cleaned = implode('-', str_split($mac_cleaned, 2)); // Aruba prefiere AA-BB-CC-DD-EE-FF
-    }
-    
-    detailed_log("MAC normalizado: $mac_cleaned");
-    
-    // ✅ ATRIBUTOS CoA/DM según RFC 5176 y Aruba
-    $attributes = [
-        "Acct-Session-Id = \"gonet-" . time() . "-" . substr(md5($mac_cleaned), 0, 8) . "\"",
-        "Calling-Station-Id = \"$mac_cleaned\"",
-        "NAS-IP-Address = $ap_ip",
+    // Normalizar MAC (probar múltiples formatos)
+    $mac_clean = strtoupper(preg_replace('/[^A-Fa-f0-9]/', '', $mac));
+    $mac_formats = [
+        implode('-', str_split($mac_clean, 2)),  // AA-BB-CC-DD-EE-FF
+        implode(':', str_split($mac_clean, 2)),  // AA:BB:CC:DD:EE:FF
+        strtolower(implode(':', str_split($mac_clean, 2))), // aa:bb:cc:dd:ee:ff
+        $mac_clean,                               // AABBCCDDEEFF
+        strtolower($mac_clean)                    // aabbccddeeff
     ];
     
-    // Agregar User-Name si disponible
-    if (!empty($_SESSION['registration_name'])) {
-        $username = $_SESSION['registration_name'];
-        $attributes[] = "User-Name = \"$username\"";
-        detailed_log("Username: $username");
+    detailed_log("Formatos MAC a probar: " . implode(', ', $mac_formats));
+    
+    // ✅ OPCIÓN 1: Buscar sesión en radacct (si tienes acceso a MySQL)
+    $session_data = null;
+    
+    // Intentar conectar a MySQL de FreeRADIUS
+    try {
+        $db_host = '172.18.0.2'; // IP contenedor FreeRADIUS
+        $db_user = 'radius';
+        $db_pass = 'radpass';
+        $db_name = 'radius';
+        
+        $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
+        
+        if ($conn->connect_error) {
+            detailed_log("⚠️ No se pudo conectar a MySQL: " . $conn->connect_error);
+        } else {
+            detailed_log("✅ Conectado a MySQL radius");
+            
+            // Buscar sesión activa del usuario
+            $mac_escaped = $conn->real_escape_string($mac_formats[0]);
+            $query = "SELECT acctsessionid, callingstationid, nasipaddress, username, framedipaddress 
+                     FROM radacct 
+                     WHERE callingstationid IN ('" . implode("','", array_map([$conn, 'real_escape_string'], $mac_formats)) . "')
+                     AND acctstoptime IS NULL 
+                     ORDER BY acctstarttime DESC 
+                     LIMIT 1";
+            
+            detailed_log("Query: $query");
+            $result = $conn->query($query);
+            
+            if ($result && $result->num_rows > 0) {
+                $session_data = $result->fetch_assoc();
+                detailed_log("✅ Sesión encontrada en radacct:");
+                detailed_log("  - Session ID: " . $session_data['acctsessionid']);
+                detailed_log("  - MAC: " . $session_data['callingstationid']);
+                detailed_log("  - Username: " . $session_data['username']);
+                detailed_log("  - NAS IP: " . $session_data['nasipaddress']);
+                detailed_log("  - Framed IP: " . $session_data['framedipaddress']);
+            } else {
+                detailed_log("⚠️ No se encontró sesión activa en radacct");
+            }
+            $conn->close();
+        }
+    } catch (Exception $e) {
+        detailed_log("❌ Error MySQL: " . $e->getMessage());
     }
     
-    // Crear archivo temporal
-    $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
-    file_put_contents($tmpFile, implode("\n", $attributes) . "\n");
-    
-    detailed_log("Archivo temporal: $tmpFile");
-    detailed_log("Contenido:\n" . file_get_contents($tmpFile));
-    
-    // ✅ COMANDO CoA - Disconnect-Request al AP
-    $command = sprintf(
-        'radclient -r 3 -t 3 -x %s:%d disconnect %s < %s 2>&1',
-        escapeshellarg($ap_ip),
-        $coa_port,
-        escapeshellarg($coa_secret),
-        escapeshellarg($tmpFile)
-    );
-    
-    detailed_log("Ejecutando: $command");
-    
-    // Ejecutar comando
-    exec($command, $output, $return_var);
-    $result = implode("\n", $output);
-    
-    detailed_log("Return code: $return_var");
-    detailed_log("Output:\n$result");
-    
-    // Analizar respuesta
-    $coa_sent = false;
-    if ($return_var === 0) {
-        if (stripos($result, "Disconnect-ACK") !== false) {
-            detailed_log("✅ SUCCESS: Disconnect-ACK recibido");
-            $coa_message = "✅ Autorización exitosa";
-            $coa_status = "success";
-            $coa_sent = true;
-        } elseif (stripos($result, "CoA-ACK") !== false) {
-            detailed_log("✅ SUCCESS: CoA-ACK recibido");
-            $coa_message = "✅ Autorización exitosa";
-            $coa_status = "success";
-            $coa_sent = true;
-        } else {
-            detailed_log("⚠️ Respuesta inesperada (código 0)");
-            $coa_message = "⚠️ Procesando autorización...";
-            $coa_status = "warning";
+    // ✅ OPCIÓN 2: Si no hay sesión en DB, usar radclient con múltiples atributos
+    if (!$session_data) {
+        detailed_log("⚠️ Usando atributos genéricos (puede fallar)");
+        
+        // Crear archivo con TODOS los atributos posibles que el AP podría usar
+        $attributes = [];
+        
+        // Probar con cada formato de MAC
+        foreach ($mac_formats as $idx => $mac_format) {
+            detailed_log("Intento #" . ($idx + 1) . " con MAC: $mac_format");
+            
+            $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
+            $attr_content = "Calling-Station-Id = \"$mac_format\"\n";
+            
+            // Agregar IP si está disponible
+            if (!empty($ip)) {
+                $attr_content .= "Framed-IP-Address = $ip\n";
+            }
+            
+            // Agregar NAS-IP-Address
+            $attr_content .= "NAS-IP-Address = $ap_ip\n";
+            
+            file_put_contents($tmpFile, $attr_content);
+            detailed_log("Contenido:\n" . $attr_content);
+            
+            // Ejecutar radclient
+            $command = sprintf(
+                'radclient -r 2 -t 3 -x %s:%d disconnect %s < %s 2>&1',
+                escapeshellarg($ap_ip),
+                $coa_port,
+                escapeshellarg($coa_secret),
+                escapeshellarg($tmpFile)
+            );
+            
+            exec($command, $output, $return_var);
+            $result = implode("\n", $output);
+            
+            detailed_log("Return code: $return_var");
+            detailed_log("Output: $result");
+            
+            // Si recibimos ACK, salir del loop
+            if (stripos($result, "Disconnect-ACK") !== false) {
+                detailed_log("✅ SUCCESS con formato: $mac_format");
+                $coa_message = "✅ Autorización exitosa";
+                $coa_status = "success";
+                $coa_sent = true;
+                unlink($tmpFile);
+                break;
+            }
+            
+            unlink($tmpFile);
+            $output = []; // Limpiar para siguiente intento
         }
+        
+        if (!isset($coa_sent)) {
+            detailed_log("❌ Ningún formato de MAC funcionó");
+            $coa_message = "⚠️ Sesión no encontrada - Reintente conexión WiFi";
+            $coa_status = "error";
+            $coa_sent = false;
+        }
+        
     } else {
-        // Analizar errores comunes
-        if (stripos($result, "no response") !== false || stripos($result, "timed out") !== false) {
-            detailed_log("❌ ERROR: Timeout - AP no responde");
-            $coa_message = "⚠️ El AP no responde al CoA";
-            $coa_status = "error";
-        } elseif (stripos($result, "Disconnect-NAK") !== false) {
-            detailed_log("❌ ERROR: Disconnect-NAK - Sesión no encontrada");
-            $coa_message = "⚠️ Sesión no encontrada en el AP";
-            $coa_status = "warning";
-        } else {
-            detailed_log("❌ ERROR: Código $return_var");
-            $coa_message = "⚠️ Error en comunicación con AP";
-            $coa_status = "error";
+        // ✅ USAR DATOS REALES DE LA SESIÓN
+        $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
+        $attr_content = "Acct-Session-Id = \"" . $session_data['acctsessionid'] . "\"\n";
+        $attr_content .= "Calling-Station-Id = \"" . $session_data['callingstationid'] . "\"\n";
+        $attr_content .= "NAS-IP-Address = " . $session_data['nasipaddress'] . "\n";
+        
+        if (!empty($session_data['username'])) {
+            $attr_content .= "User-Name = \"" . $session_data['username'] . "\"\n";
         }
+        
+        if (!empty($session_data['framedipaddress'])) {
+            $attr_content .= "Framed-IP-Address = " . $session_data['framedipaddress'] . "\n";
+        }
+        
+        file_put_contents($tmpFile, $attr_content);
+        detailed_log("✅ Usando datos reales de sesión:\n" . $attr_content);
+        
+        $command = sprintf(
+            'radclient -r 3 -t 5 -x %s:%d disconnect %s < %s 2>&1',
+            escapeshellarg($ap_ip),
+            $coa_port,
+            escapeshellarg($coa_secret),
+            escapeshellarg($tmpFile)
+        );
+        
+        exec($command, $output, $return_var);
+        $result = implode("\n", $output);
+        
+        detailed_log("Return code: $return_var");
+        detailed_log("Output:\n$result");
+        
+        if ($return_var === 0 && stripos($result, "Disconnect-ACK") !== false) {
+            detailed_log("✅ SUCCESS con datos de sesión");
+            $coa_message = "✅ Autorización exitosa";
+            $coa_status = "success";
+            $coa_sent = true;
+        } else {
+            detailed_log("❌ Falló incluso con datos correctos");
+            $coa_message = "⚠️ Error en desconexión - Verifique AP";
+            $coa_status = "error";
+            $coa_sent = false;
+        }
+        
+        unlink($tmpFile);
     }
     
-    unlink($tmpFile);
     $_SESSION['coa_executed'] = true;
-    $_SESSION['coa_status'] = $coa_status;
+    $_SESSION['coa_status'] = $coa_status ?? 'error';
     
 } else {
-    detailed_log("❌ MAC address no disponible");
+    detailed_log("❌ MAC no disponible");
     $coa_message = "⚠️ No se detectó dirección MAC";
     $coa_status = "error";
     $coa_sent = false;
@@ -137,12 +206,12 @@ $redirect_url = 'success.php';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GoNet WiFi - Autorizando</title>
+    <title>GoNet WiFi - Autorizando Acceso</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            font-family: 'Arial', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -196,74 +265,95 @@ $redirect_url = 'success.php';
             color: #666;
         }
         .info-box {
-            background: #f8f9fa;
+            background: #e3f2fd;
             padding: 15px;
             border-radius: 10px;
             margin-top: 20px;
             text-align: left;
             font-size: 0.9rem;
-            color: #555;
+            color: #1565c0;
+            border-left: 4px solid #2196f3;
         }
-        .info-box strong { color: #333; }
-        .debug-link {
-            margin-top: 15px;
-            font-size: 0.85rem;
+        .error-box {
+            background: #ffebee;
+            border-left-color: #f44336;
+            color: #c62828;
         }
-        .debug-link a {
-            color: #2196f3;
-            text-decoration: none;
+        .info-box strong { display: block; margin-bottom: 8px; }
+        .manual-steps {
+            text-align: left;
+            margin-top: 10px;
+            line-height: 1.6;
         }
+        .manual-steps li { margin: 5px 0; }
     </style>
     
-    <meta http-equiv="refresh" content="5;url=<?php echo $redirect_url; ?>">
+    <meta http-equiv="refresh" content="6;url=<?php echo $redirect_url; ?>">
     <script>
-        let seconds = 5;
+        let seconds = 6;
         const countdownEl = document.getElementById('countdown');
         
         const timer = setInterval(() => {
             seconds--;
-            if (countdownEl) {
-                countdownEl.textContent = seconds;
-            }
-            if (seconds <= 0) {
-                clearInterval(timer);
-            }
+            if (countdownEl) countdownEl.textContent = seconds;
+            if (seconds <= 0) clearInterval(timer);
         }, 1000);
         
-        // Intentar abrir Internet después de 2 segundos
+        <?php if ($coa_status === 'success'): ?>
         setTimeout(() => {
             window.open('http://www.google.com', '_blank');
         }, 2000);
+        <?php endif; ?>
     </script>
 </head>
 <body>
     <img src="gonetlogo.png" alt="GoNet WiFi" class="logo">
 
     <div class="container">
-        <div class="spinner"></div>
+        <?php if ($coa_status !== 'success'): ?>
+            <div style="font-size: 3rem; margin-bottom: 15px;">⚠️</div>
+        <?php else: ?>
+            <div class="spinner"></div>
+        <?php endif; ?>
         
-        <div class="status <?php echo $coa_status ?? 'warning'; ?>">
+        <div class="status <?php echo $coa_status ?? 'error'; ?>">
             <?php echo htmlspecialchars($coa_message); ?>
         </div>
         
-        <div class="countdown">
-            Redirigiendo en <span id="countdown">5</span> segundos...
+        <?php if ($coa_status === 'error'): ?>
+        <div class="info-box error-box">
+            <strong>⚠️ Sesión no encontrada en el Access Point</strong>
+            <p>Para continuar navegando:</p>
+            <ol class="manual-steps">
+                <li>Desconéctese del WiFi</li>
+                <li>Vuelva a conectarse</li>
+                <li>Complete el registro nuevamente</li>
+            </ol>
+            <p style="margin-top: 10px; font-size: 0.85rem;">
+                <em>Nota: El portal detectará su sesión automáticamente</em>
+            </p>
         </div>
-        
-        <?php if (!empty($mac)): ?>
-        <div class="info-box">
-            <strong>📱 Dispositivo registrado:</strong><br>
-            <?php echo htmlspecialchars($mac_cleaned ?? $mac); ?>
-            <?php if (!empty($ip)): ?>
-            <br><strong>🌐 IP:</strong> <?php echo htmlspecialchars($ip); ?>
-            <?php endif; ?>
+        <?php else: ?>
+        <div class="countdown">
+            Redirigiendo en <span id="countdown">6</span> segundos...
         </div>
         <?php endif; ?>
         
-        <div class="debug-link">
-            <a href="javascript:void(0)" onclick="alert('Log: <?php echo $log_file; ?>')">
-                🔍 Ver logs de depuración
-            </a>
+        <?php if (!empty($mac) && isset($session_data)): ?>
+        <div class="info-box">
+            <strong>📱 Sesión detectada:</strong>
+            MAC: <?php echo htmlspecialchars($session_data['callingstationid']); ?><br>
+            Session ID: <?php echo htmlspecialchars(substr($session_data['acctsessionid'], 0, 16)); ?>...
+        </div>
+        <?php elseif (!empty($mac)): ?>
+        <div class="info-box">
+            <strong>📱 Dispositivo:</strong>
+            <?php echo htmlspecialchars($mac); ?>
+        </div>
+        <?php endif; ?>
+        
+        <div style="margin-top: 20px; font-size: 0.85rem; color: #999;">
+            Logs: <code><?php echo $log_file; ?></code>
         </div>
     </div>
 </body>
