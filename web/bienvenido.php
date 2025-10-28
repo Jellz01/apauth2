@@ -1,93 +1,45 @@
 <?php
-// bienvenido.php - RECIBE MAC Y IP DE SESIÓN CON LOGGING DETALLADO - UDP CORREGIDO
-
-// Iniciar sesión ANTES de cualquier output
+// bienvenido.php - CON LOADING AUTOMÁTICO
 session_start();
 
-// ----------------------------
-// 🔧 Configuration for CoA
-// ----------------------------
-$ap_ip = '192.168.0.9';   // Aruba AP IP
-$coa_port = 4325;         // CoA port (RFC 3576) - PUERTO UDP CORRECTO
-$coa_secret = 'telecom';  // Must match your clients.conf coa secret
+// Configuración
+$ap_ip = '192.168.0.9';
+$coa_port = 4325;
+$coa_secret = 'telecom';
 
-// Crear archivo de log detallado
 $log_file = '/tmp/coa_debug_' . date('Y-m-d_H-i-s') . '.log';
-$php_error_log = ini_get('error_log');
 
 function detailed_log($message) {
-    global $log_file, $php_error_log;
+    global $log_file;
     $timestamp = date('Y-m-d H:i:s');
     $full_message = "[$timestamp] $message\n";
-    
-    // Log a archivo de depuración
     file_put_contents($log_file, $full_message, FILE_APPEND);
-    
-    // Log a error_log de PHP
-    error_log($full_message);
-    
-    // Log a stdout (Docker)
-    echo "<!-- DEBUG: $message -->\n";
+    error_log($message);
 }
 
-// ----------------------------
-// 📥 Get MAC and IP from SESSION
-// ----------------------------
+detailed_log("=== INICIO BIENVENIDO.PHP ===");
+
 $mac = isset($_SESSION['registration_mac']) ? trim($_SESSION['registration_mac']) : '';
 $ip = isset($_SESSION['registration_ip']) ? trim($_SESSION['registration_ip']) : '';
 $coa_sent = false;
 $coa_message = '';
 
-detailed_log("=== INICIO BIENVENIDO.PHP - UDP CoA ===");
-detailed_log("MAC de sesión: $mac");
-detailed_log("IP de sesión: $ip");
-detailed_log("AP IP: $ap_ip");
-detailed_log("CoA Puerto: $coa_port (UDP)");
-detailed_log("CoA Secret: $coa_secret");
-detailed_log("Protocolo: UDP (RFC 3576 standard)");
-
-// ----------------------------
-// 📡 Send CoA if MAC exists
-// ----------------------------
-// FORZAR NUEVO CoA (eliminar marca de ejecución previa para testing)
-unset($_SESSION['coa_executed']);
+// ✅ NUEVO: Determinar si debemos redirigir automáticamente
+$auto_redirect = false;
+$redirect_url = 'success.php'; // Cambia por tu página de éxito
 
 if (!empty($mac)) {
-    detailed_log("✓ MAC no vacía, procediendo con CoA...");
+    detailed_log("Procesando MAC: $mac");
     
     $mac_cleaned = preg_replace('/[^A-Fa-f0-9:]/', '', $mac);
-    detailed_log("✓ MAC limpiado: $mac_cleaned (original: $mac)");
     
-    // Crear atributos RADIUS - FORMATO CORREGIDO
+    // Crear atributos RADIUS
     $attributes = "User-Name = \"$mac_cleaned\"\nAcct-Session-Id = \"coa-reauth-" . time() . "\"";
-    detailed_log("✓ Atributos RADIUS creados:\n$attributes");
     
-    // Crear archivo temporal
     $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
-    detailed_log("✓ Archivo temporal creado: $tmpFile");
+    file_put_contents($tmpFile, $attributes);
     
-    // Escribir atributos en archivo
-    $bytes_written = file_put_contents($tmpFile, $attributes);
-    detailed_log("✓ Bytes escritos en archivo temporal: $bytes_written");
-    
-    // Leer contenido para verificar
-    $file_content = file_get_contents($tmpFile);
-    detailed_log("✓ Contenido del archivo temporal:\n$file_content");
-    
-    // Verificar que radclient existe
-    $radclient_check = shell_exec('which radclient 2>&1');
-    detailed_log("✓ radclient ubicación: " . trim($radclient_check));
-    
-    // ✅ CORREGIDO: Verificar conectividad UDP al AP (no TCP)
-    detailed_log("✓ Verificando conectividad UDP al AP $ap_ip:$coa_port...");
-    $nc_check = shell_exec("nc -zvu $ap_ip $coa_port 2>&1");
-    detailed_log("✓ Resultado nc UDP: " . trim($nc_check));
-    
-    // ✅ CORREGIDO: Información adicional sobre el protocolo
-    detailed_log("✓ CoA siempre usa UDP por defecto (RFC 3576)");
-    detailed_log("✓ radclient enviará paquetes UDP automáticamente");
-    
-    // Construir comando CoA - radclient SIEMPRE usa UDP para CoA
+    // Ejecutar CoA
     $command = sprintf(
         'cat %s | radclient -r 2 -t 3 -x %s:%d coa %s 2>&1',
         escapeshellarg($tmpFile),
@@ -96,83 +48,42 @@ if (!empty($mac)) {
         escapeshellarg($coa_secret)
     );
     
-    detailed_log("✓ Comando CoA UDP construido:");
-    detailed_log("  $command");
-    
-    // Ejecutar comando CoA
-    detailed_log("🔥 EJECUTANDO CoA UDP...");
-    $output = [];
-    $return_var = 0;
     exec($command, $output, $return_var);
-    
-    detailed_log("✓ Comando ejecutado con código de retorno: $return_var");
-    detailed_log("✓ Output del comando (" . count($output) . " líneas):");
-    foreach ($output as $idx => $line) {
-        detailed_log("  [$idx] $line");
-    }
-    
-    // Analizar respuesta
     $coa_output = implode(" | ", $output);
-    detailed_log("✓ Output combinado: $coa_output");
     
-    // Validar respuestas - CONSIDERAR "No reply" COMO ÉXITO PARCIAL
+    // ✅ NUEVA LÓGICA: Considerar éxito aunque no haya respuesta
     if ($return_var === 0) {
-        detailed_log("✓ Código de retorno 0 (éxito)");
-        
-        if (strpos($coa_output, "Received Disconnect-ACK") !== false) {
-            detailed_log("✓ Respuesta contiene: Received Disconnect-ACK");
+        if (strpos($coa_output, "Received Disconnect-ACK") !== false || 
+            strpos($coa_output, "Received CoA-ACK") !== false) {
             $coa_sent = true;
-            $coa_message = '✅ CoA-ACK recibido - Usuario autorizado';
-        } elseif (strpos($coa_output, "Received CoA-ACK") !== false) {
-            detailed_log("✓ Respuesta contiene: Received CoA-ACK");
-            $coa_sent = true;
-            $coa_message = '✅ CoA-ACK recibido - Sesión actualizada';
-        } elseif (strpos($coa_output, "No reply from server") !== false) {
-            detailed_log("⚠️ CoA enviado pero sin respuesta - puede ser normal en UDP");
-            $coa_sent = true; // Considerar como éxito
-            $coa_message = '✅ CoA enviado - Procesando conexión...';
+            $coa_message = '✅ Autorización exitosa';
+            $auto_redirect = true; // ✅ Redirigir automáticamente
         } else {
-            detailed_log("⚠️ Código 0 pero respuesta inesperada");
+            // ✅ Aunque no haya respuesta, consideramos éxito y redirigimos
             $coa_sent = true;
-            $coa_message = '✅ CoA procesado - Conectando...';
+            $coa_message = '✅ Procesando tu conexión...';
+            $auto_redirect = true; // ✅ Redirigir automáticamente
         }
     } else {
-        detailed_log("❌ Código de retorno: $return_var (ERROR)");
         $coa_sent = false;
-        $coa_message = '⚠️ Error enviando CoA: ' . htmlspecialchars($coa_output);
+        $coa_message = '⚠️ Error en autorización';
     }
     
-    // Eliminar archivo temporal
     unlink($tmpFile);
-    detailed_log("✓ Archivo temporal eliminado: $tmpFile");
-    
-    detailed_log("✓ Estado final CoA: " . ($coa_sent ? 'ÉXITO' : 'FALLO'));
-    detailed_log("✓ Mensaje: $coa_message");
-    
-    // Marcar CoA como ejecutado
     $_SESSION['coa_executed'] = true;
-    detailed_log("✓ Sesión marcada como coa_executed");
     
-} elseif (!empty($mac) && isset($_SESSION['coa_executed'])) {
-    detailed_log("ℹ️ CoA ya fue ejecutado previamente");
-    $coa_sent = true;
-    $coa_message = '✅ Ya conectado - Disfrutando de GoNet Wi-Fi';
 } else {
-    detailed_log("❌ No hay MAC en sesión o está vacía");
-    $coa_sent = false;
-    $coa_message = '⚠️ No hay información de dispositivo';
+    $coa_message = '⚠️ No se detectó dirección MAC';
 }
 
-detailed_log("=== FIN LÓGICA CoA ===");
-detailed_log("Archivo de log: $log_file");
-detailed_log("Error log PHP: $php_error_log");
+detailed_log("Resultado: " . ($coa_sent ? 'ÉXITO' : 'FALLO') . " - Redirección: " . ($auto_redirect ? 'SÍ' : 'NO'));
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GoNet WiFi - Bienvenido</title>
+    <title>GoNet WiFi - Conectando</title>
     <style>
         * {
             margin: 0;
@@ -184,7 +95,12 @@ detailed_log("Error log PHP: $php_error_log");
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             font-family: 'Arial', sans-serif;
             display: flex;
-            flexacing: 20px;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            text-align: center;
+            padding: 20px;
             color: #333;
         }
         
@@ -198,7 +114,7 @@ detailed_log("Error log PHP: $php_error_log");
         
         .coa-status {
             background: white;
-            padding: 30px;
+            padding: 40px 30px;
             border-radius: 15px;
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
             max-width: 450px;
@@ -237,6 +153,53 @@ detailed_log("Error log PHP: $php_error_log");
             border-left: 5px solid #ff9800;
         }
         
+        .loading-container {
+            margin: 25px 0;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50, #8bc34a);
+            border-radius: 3px;
+            animation: progress 2s ease-in-out infinite;
+        }
+        
+        @keyframes progress {
+            0% { width: 0%; }
+            50% { width: 70%; }
+            100% { width: 100%; }
+        }
+        
+        .countdown {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 15px;
+        }
+        
         .mac {
             font-size: 0.9rem;
             color: inherit;
@@ -244,11 +207,6 @@ detailed_log("Error log PHP: $php_error_log");
             padding-top: 15px;
             border-top: 1px solid rgba(0, 0, 0, 0.1);
             word-break: break-all;
-        }
-        
-        .mac strong {
-            display: block;
-            margin-bottom: 8px;
         }
         
         .mac code {
@@ -260,104 +218,113 @@ detailed_log("Error log PHP: $php_error_log");
             font-family: monospace;
             font-size: 0.85rem;
         }
-        
-        .loading {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            background: currentColor;
-            border-radius: 50%;
-            opacity: 0.7;
-            margin: 0 3px;
-            animation: pulse 1.4s infinite;
-        }
-        
-        .loading:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-        
-        .loading:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-        
-        @keyframes pulse {
-            0%, 60%, 100% {
-                opacity: 0.7;
-                transform: scale(0.8);
-            }
-            30% {
-                opacity: 1;
-                transform: scale(1);
-            }
-        }
 
         .debug-info {
             background: #f5f5f5;
             padding: 15px;
             border-radius: 10px;
             margin-top: 20px;
-            max-width: 500px;
             text-align: left;
             font-size: 0.8rem;
             font-family: monospace;
             border: 1px solid #ddd;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        .protocol-badge {
-            background: #2196f3;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            margin-left: 8px;
         }
     </style>
+    
+    <?php if ($auto_redirect): ?>
+    <!-- ✅ REDIRECCIÓN AUTOMÁTICA después de 3 segundos -->
+    <meta http-equiv="refresh" content="3;url=<?php echo $redirect_url; ?>">
+    <script>
+        // También redirigir con JavaScript por si acaso
+        setTimeout(function() {
+            window.location.href = '<?php echo $redirect_url; ?>';
+        }, 3000);
+        
+        // Mostrar cuenta regresiva
+        let countdown = 3;
+        setInterval(function() {
+            countdown--;
+            const element = document.getElementById('countdown');
+            if (element) {
+                element.textContent = countdown;
+            }
+        }, 1000);
+    </script>
+    <?php endif; ?>
 </head>
 <body>
     <img src="gonetlogo.png" alt="GoNet Logo" class="logo">
 
-    <?php if (!empty($mac)): ?>
-        <div class="coa-status <?php echo $coa_sent ? 'success' : 'error'; ?>">
-            <div>
-                <?php echo htmlspecialchars($coa_message); ?>
-                <span class="protocol-badge" title="Change of Authorization over UDP">UDP CoA</span>
-                <?php if (!$coa_sent): ?>
-                    <div style="margin-top: 10px;">
-                        <span class="loading"></span><span class="loading"></span><span class="loading"></span>
-                    </div>
-                <?php endif; ?>
+    <div class="coa-status <?php echo $coa_sent ? 'success' : 'error'; ?>">
+        <!-- ✅ SIEMPRE MOSTRAR LOADING -->
+        <div class="loading-container">
+            <div class="spinner"></div>
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
             </div>
-            <div class="mac">
-                <strong>🔧 Dispositivo MAC:</strong>
-                <code><?php echo htmlspecialchars($mac); ?></code>
-            </div>
-            <?php if (!empty($ip)): ?>
-                <div class="mac">
-                    <strong>🌐 Dirección IP:</strong>
-                    <code><?php echo htmlspecialchars($ip); ?></code>
-                </div>
-            <?php endif; ?>
+            <strong><?php echo htmlspecialchars($coa_message); ?></strong>
             
-            <div class="debug-info">
-                <strong>📋 Información de Debug UDP:</strong><br>
-                Protocolo: UDP (RFC 3576 CoA)<br>
-                Puerto: <?php echo $coa_port; ?> UDP<br>
-                AP: <?php echo htmlspecialchars($ap_ip); ?><br>
-                Conectividad UDP: ✅ Confirmada<br>
-                Archivo de log: <?php echo htmlspecialchars($log_file); ?><br>
-                Estado: <?php echo $coa_sent ? 'ENVIADO ✓' : 'FALLIDO ✗'; ?>
+            <?php if ($auto_redirect): ?>
+            <div class="countdown">
+                Redirigiendo en <span id="countdown">3</span> segundos...
             </div>
+            <?php else: ?>
+            <div class="countdown">
+                Por favor espera...
+            </div>
+            <?php endif; ?>
         </div>
-    <?php else: ?>
-        <div class="coa-status warning">
-            ⚠️ No se detectó ninguna dirección MAC.<br>
-            <small style="font-size: 0.85rem; margin-top: 10px; display: block;">
-                Intenta recargar la página o conéctate a la red Wi-Fi nuevamente.
-            </small>
+        
+        <?php if (!empty($mac)): ?>
+        <div class="mac">
+            <strong>🔧 Dispositivo MAC:</strong>
+            <code><?php echo htmlspecialchars($mac); ?></code>
         </div>
-    <?php endif; ?>
+        <?php endif; ?>
+        
+        <?php if (!empty($ip)): ?>
+        <div class="mac">
+            <strong>🌐 Dirección IP:</strong>
+            <code><?php echo htmlspecialchars($ip); ?></code>
+        </div>
+        <?php endif; ?>
+        
+        <div class="debug-info">
+            <strong>📋 Estado del Sistema:</strong><br>
+            <?php if ($auto_redirect): ?>
+            ✅ CoA procesado - Redirección automática activada<br>
+            <?php else: ?>
+            ⚠️ Esperando respuesta del sistema<br>
+            <?php endif; ?>
+            Protocolo: UDP CoA<br>
+            AP: <?php echo htmlspecialchars($ap_ip); ?>
+        </div>
+    </div>
 
+    <!-- ✅ Script para manejar casos sin redirección automática -->
+    <script>
+        // Si no hay redirección automática después de 5 segundos, ofrecer botón manual
+        setTimeout(function() {
+            if (!<?php echo $auto_redirect ? 'true' : 'false'; ?>) {
+                const statusDiv = document.querySelector('.coa-status');
+                const button = document.createElement('button');
+                button.innerHTML = '🔄 Continuar Manualmente';
+                button.style.cssText = `
+                    background: #2196F3;
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                    cursor: pointer;
+                    margin-top: 15px;
+                `;
+                button.onclick = function() {
+                    window.location.href = '<?php echo $redirect_url; ?>';
+                };
+                statusDiv.appendChild(button);
+            }
+        }, 5000);
+    </script>
 </body>
 </html>
