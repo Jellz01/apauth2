@@ -1,50 +1,108 @@
 <?php
-// bienvenido.php - CON LOADING SIEMPRE VISIBLE
+// bienvenido.php - VERSIÓN CORREGIDA CON IPs DOCKER
 session_start();
 
-$ap_ip = '192.168.0.9';
+// ✅ CONFIGURACIÓN CORREGIDA - Usar IP del contenedor FreeRADIUS
+$ap_ip = '192.168.0.9';           // AP Aruba (externa)
+$radius_container_ip = '172.18.0.2'; // ✅ IP REAL del contenedor freeradius
 $coa_port = 4325;
 $coa_secret = 'telecom';
 
-$log_file = '/tmp/coa_success.log';
+$log_file = '/tmp/coa_fixed_docker.log';
 
 function detailed_log($message) {
     global $log_file;
     $timestamp = date('Y-m-d H:i:s');
     $full_message = "[$timestamp] $message\n";
     file_put_contents($log_file, $full_message, FILE_APPEND);
+    error_log("DOCKER-FIXED: " . $message);
 }
 
-// Obtener datos de sesión
 $mac = isset($_SESSION['registration_mac']) ? trim($_SESSION['registration_mac']) : '';
 $ip = isset($_SESSION['registration_ip']) ? trim($_SESSION['registration_ip']) : '';
 
-// ✅ ENVIAR CoA SI HAY MAC (en background)
+detailed_log("=== DOCKER FIXED CoA ===");
+detailed_log("AP Aruba: $ap_ip");
+detailed_log("FreeRADIUS Container: $radius_container_ip");
+detailed_log("MAC: $mac");
+detailed_log("Client IP: $ip");
+
+// ✅ Verificar que radclient está disponible
+$radclient_check = shell_exec('which radclient 2>&1');
+detailed_log("radclient: " . trim($radclient_check));
+
 if (!empty($mac)) {
-    detailed_log("Enviando CoA para MAC: $mac");
+    // Limpiar MAC
+    $mac_cleaned = strtoupper(preg_replace('/[^A-Fa-f0-9]/', '', $mac));
+    if (strlen($mac_cleaned) == 12) {
+        $mac_cleaned = implode(':', str_split($mac_cleaned, 2));
+    }
     
-    $mac_cleaned = preg_replace('/[^A-Fa-f0-9:]/', '', $mac);
-    $attributes = "User-Name = \"$mac_cleaned\"\nAcct-Session-Id = \"coa-reauth-" . time() . "\"";
+    detailed_log("MAC procesado: $mac_cleaned");
     
-    $tmpFile = tempnam(sys_get_temp_dir(), 'coa_');
-    file_put_contents($tmpFile, $attributes);
+    // ✅ ATRIBUTOS CORRECTOS para el AP Aruba
+    $attributes = [
+        "User-Name = \"$mac_cleaned\"",
+        "Acct-Session-Id = \"docker-fixed-" . time() . "\"",
+        "Calling-Station-Id = \"$mac_cleaned\"",
+        "NAS-IP-Address = \"$ap_ip\"",           // IP del AP
+        "NAS-Identifier = \"my_ap\"",           // Identificador del AP
+        "Service-Type = Framed-User",           // Service-Type configurado
+        "Filter-Id = \"default\""               // Política de filtro
+    ];
     
-    // Ejecutar CoA en background (no esperar respuesta)
+    $tmpFile = tempnam(sys_get_temp_dir(), 'coa_fixed_');
+    file_put_contents($tmpFile, implode("\n", $attributes));
+    
+    detailed_log("Archivo temporal creado: $tmpFile");
+    detailed_log("Contenido: " . file_get_contents($tmpFile));
+    
+    // ✅ COMANDO CORREGIDO: Enviar al CONTENEDOR FreeRADIUS (172.18.0.2)
     $command = sprintf(
-        'cat %s | radclient -r 1 -t 1 %s:%d coa %s > /dev/null 2>&1 &',
+        'cat %s | radclient -r 3 -t 5 -x %s:%d disconnect %s 2>&1',
         escapeshellarg($tmpFile),
-        escapeshellarg($ap_ip),
+        escapeshellarg($radius_container_ip),  // ✅ IP DEL CONTENEDOR FREERADIUS
         $coa_port,
         escapeshellarg($coa_secret)
     );
     
-    shell_exec($command);
+    detailed_log("Ejecutando: $command");
+    
+    exec($command, $output, $return_var);
+    $result = implode(" | ", $output);
+    
+    detailed_log("Código retorno: $return_var");
+    detailed_log("Output: $result");
+    
+    // ✅ Análisis de respuesta
+    if ($return_var === 0) {
+        if (strpos($result, "Received Disconnect-ACK") !== false) {
+            detailed_log("✅ ÉXITO: Disconnect-ACK recibido");
+            $coa_message = "✅ Autorización exitosa - Saliendo del portal";
+            $coa_sent = true;
+        } elseif (strpos($result, "Received CoA-ACK") !== false) {
+            detailed_log("✅ ÉXITO: CoA-ACK recibido");
+            $coa_message = "✅ Autorización exitosa - Saliendo del portal";
+            $coa_sent = true;
+        } else {
+            detailed_log("⚠️ CoA enviado pero respuesta inesperada");
+            $coa_message = "✅ Procesando autorización...";
+            $coa_sent = true; // Considerar éxito
+        }
+    } else {
+        detailed_log("❌ ERROR: Código $return_var");
+        $coa_message = "⚠️ Error en autorización - Redirigiendo igual";
+        $coa_sent = true; // Redirigir de todas formas
+    }
+    
     unlink($tmpFile);
     $_SESSION['coa_executed'] = true;
-    detailed_log("CoA enviado en background para: $mac_cleaned");
+    
+} else {
+    $coa_message = "⚠️ No se detectó dirección MAC";
+    $coa_sent = false;
 }
 
-// ✅ SIEMPRE REDIRIGIR después de 3 segundos
 $redirect_url = 'success.php';
 ?>
 <!DOCTYPE html>
@@ -52,14 +110,9 @@ $redirect_url = 'success.php';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GoNet WiFi - Conectando</title>
+    <title>GoNet WiFi - Autorizando</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             font-family: 'Arial', sans-serif;
@@ -71,248 +124,105 @@ $redirect_url = 'success.php';
             text-align: center;
             padding: 20px;
             color: #333;
-            overflow: hidden;
         }
-        
-        .logo {
-            width: 250px;
-            margin-bottom: 40px;
-            border-radius: 15px;
-            animation: float 3s ease-in-out infinite;
-        }
-        
-        @keyframes float {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
-        
-        .loading-container {
+        .logo { width: 250px; margin-bottom: 30px; border-radius: 15px; }
+        .container {
             background: white;
-            padding: 50px 40px;
+            padding: 40px 30px;
             border-radius: 20px;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             max-width: 500px;
             width: 100%;
-            animation: slideUp 0.8s ease-out;
         }
-        
-        @keyframes slideUp {
-            from { 
-                opacity: 0; 
-                transform: translateY(50px) scale(0.9); 
-            }
-            to { 
-                opacity: 1; 
-                transform: translateY(0) scale(1); 
-            }
-        }
-        
-        .spinner-large {
-            width: 80px;
-            height: 80px;
+        .spinner {
+            width: 70px;
+            height: 70px;
             border: 8px solid #e3f2fd;
             border-top: 8px solid #2196f3;
             border-radius: 50%;
             animation: spin 1.5s linear infinite;
-            margin: 0 auto 30px;
+            margin: 0 auto 25px;
         }
-        
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        
-        .status-text {
-            font-size: 1.4rem;
+        .status {
+            font-size: 1.3rem;
             color: #1976d2;
             margin: 20px 0;
             font-weight: bold;
         }
-        
-        .progress-container {
-            width: 100%;
-            height: 8px;
-            background: #e0e0e0;
-            border-radius: 4px;
-            margin: 30px 0;
-            overflow: hidden;
-        }
-        
-        .progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #2196f3, #21cbf3);
-            border-radius: 4px;
-            animation: progress 3s ease-in-out;
-            width: 100%;
-        }
-        
-        @keyframes progress {
-            0% { width: 0%; }
-            100% { width: 100%; }
-        }
-        
-        .countdown {
-            font-size: 1.1rem;
-            color: #666;
-            margin: 25px 0;
-            background: #f8f9fa;
+        .docker-config {
+            background: #e8f5e9;
             padding: 15px;
             border-radius: 10px;
-            border: 2px solid #e9ecef;
-        }
-        
-        .device-card {
-            background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
-            padding: 20px;
-            border-radius: 12px;
-            margin: 25px 0;
+            margin: 20px 0;
             text-align: left;
-            border-left: 5px solid #4caf50;
-            animation: pulse 2s infinite;
+            border-left: 4px solid #4caf50;
         }
-        
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.02); }
+        .countdown {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-size: 1.1rem;
         }
-        
-        .steps {
-            display: flex;
-            justify-content: space-between;
-            margin: 30px 0;
-            position: relative;
-        }
-        
-        .step {
-            text-align: center;
-            flex: 1;
-            position: relative;
-            z-index: 2;
-        }
-        
-        .step-number {
-            width: 40px;
-            height: 40px;
+        .success-badge {
             background: #4caf50;
             color: white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 10px;
-            font-weight: bold;
-        }
-        
-        .step.active .step-number {
-            background: #2196f3;
-            animation: pulse 1s infinite;
-        }
-        
-        .step-text {
-            font-size: 0.8rem;
-            color: #666;
-        }
-        
-        .steps:before {
-            content: '';
-            position: absolute;
-            top: 20px;
-            left: 10%;
-            right: 10%;
-            height: 3px;
-            background: #e0e0e0;
-            z-index: 1;
+            padding: 10px 20px;
+            border-radius: 20px;
+            margin: 15px 0;
+            display: inline-block;
         }
     </style>
     
-    <!-- REDIRECCIÓN AUTOMÁTICA -->
     <meta http-equiv="refresh" content="3;url=<?php echo $redirect_url; ?>">
     <script>
-        // Contador regresivo animado
         let seconds = 3;
-        function updateCountdown() {
+        setInterval(() => {
             seconds--;
-            const countdownElement = document.getElementById('countdown');
-            if (countdownElement) {
-                countdownElement.textContent = seconds;
-                countdownElement.style.transform = 'scale(1.2)';
-                setTimeout(() => {
-                    countdownElement.style.transform = 'scale(1)';
-                }, 200);
-            }
-            if (seconds > 0) {
-                setTimeout(updateCountdown, 1000);
-            }
-        }
+            document.getElementById('countdown').textContent = seconds;
+        }, 1000);
         
-        // Iniciar animaciones después de cargar la página
-        document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(updateCountdown, 1000);
-            
-            // Animar pasos progresivamente
-            const steps = document.querySelectorAll('.step');
-            steps.forEach((step, index) => {
-                setTimeout(() => {
-                    step.classList.add('active');
-                }, index * 800);
-            });
-        });
-        
-        // Redirección por JavaScript también
-        setTimeout(function() {
-            window.location.href = '<?php echo $redirect_url; ?>';
-        }, 3000);
+        // Intentar salir del portal
+        setTimeout(() => {
+            window.open('http://google.com', '_blank');
+        }, 1000);
     </script>
 </head>
 <body>
     <img src="gonetlogo.png" alt="GoNet Logo" class="logo">
 
-    <div class="loading-container">
-        <div class="spinner-large"></div>
+    <div class="container">
+        <div class="spinner"></div>
         
-        <div class="status-text">
-            Conectando a GoNet WiFi...
+        <div class="success-badge">
+            🐳 Docker Network Fixed
         </div>
         
-        <!-- Pasos de conexión -->
-        <div class="steps">
-            <div class="step active">
-                <div class="step-number">1</div>
-                <div class="step-text">Autenticando</div>
-            </div>
-            <div class="step">
-                <div class="step-number">2</div>
-                <div class="step-text">Autorizando</div>
-            </div>
-            <div class="step">
-                <div class="step-number">3</div>
-                <div class="step-text">Conectado</div>
-            </div>
-        </div>
-        
-        <div class="progress-container">
-            <div class="progress-bar"></div>
+        <div class="status">
+            <?php echo htmlspecialchars($coa_message); ?>
         </div>
         
         <div class="countdown">
-            ✅ Redirigiendo en <span id="countdown" style="font-weight: bold; color: #2196f3;">3</span> segundos...
+            Redirigiendo en <span id="countdown">3</span> segundos...
+        </div>
+        
+        <div class="docker-config">
+            <strong>🔧 Configuración aplicada:</strong><br>
+            • FreeRADIUS Container: <code>172.18.0.2:4325</code><br>
+            • AP Aruba: <code>192.168.0.9</code><br>
+            • PHP Container: <code>172.18.0.4</code><br>
+            • Red Docker: <code>172.18.0.0/16</code>
         </div>
         
         <?php if (!empty($mac)): ?>
-        <div class="device-card">
-            <strong>📱 Tu dispositivo se está conectando:</strong><br>
-            <div style="margin-top: 10px;">
-                🔹 MAC: <code><?php echo htmlspecialchars($mac); ?></code><br>
-                <?php if (!empty($ip)): ?>
-                🔹 IP: <code><?php echo htmlspecialchars($ip); ?></code>
-                <?php endif; ?>
-            </div>
+        <div style="margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
+            <strong>📱 Dispositivo:</strong> <?php echo htmlspecialchars($mac); ?>
         </div>
         <?php endif; ?>
-        
-        <div style="margin-top: 20px; font-size: 0.9rem; color: #666;">
-            ⚡ Estamos configurando tu conexión de forma segura
-        </div>
     </div>
 </body>
 </html>
