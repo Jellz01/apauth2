@@ -1,27 +1,18 @@
 <?php
-// register_client.php - VERSIÓN CORREGIDA CON SESIÓN
-
-// Iniciar sesión ANTES de cualquier output
 session_start();
 
-// ----------------------------
-// 🐛 HABILITAR DEBUGGING
-// ----------------------------
+
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-// ----------------------------
-// 🔧 Database Configuration
-// ----------------------------
+
 $host = "mysql";
 $user = "radius";
 $pass = "radpass";
 $db   = "radius";
 
-// ----------------------------
-// 🧰 Helpers
-// ----------------------------
+
 function normalize_mac($mac_raw) {
     if (empty($mac_raw)) return '';
     $hex = preg_replace('/[^0-9A-Fa-f]/', '', (string)$mac_raw);
@@ -31,7 +22,7 @@ function normalize_mac($mac_raw) {
 function redirect_to_bienvenido($mac_norm, $ip) {
     error_log("🎯 REDIRIGIENDO A BIENVENIDO.PHP CON MAC: $mac_norm");
     
-    // Guardar en sesión
+   
     $_SESSION['registration_mac'] = $mac_norm;
     $_SESSION['registration_ip'] = $ip;
     $_SESSION['coa_executed'] = false;
@@ -56,17 +47,15 @@ function redirect_to_bienvenido($mac_norm, $ip) {
     }
 }
 
-// ----------------------------
-// 🔥 FUNCIÓN CoA
-// ----------------------------
+//  CONFIGURACIONES DEL COA 
 function execute_coa($mac, $ap_ip) {
-    error_log("🔥 EJECUTANDO CoA PARA MAC: $mac, IP AP: $ap_ip");
+    
     
     $coa_secret = "telecom";
     $coa_port = "4325";
     
     if (empty($mac) || empty($ap_ip)) {
-        error_log("❌ PARÁMETROS FALTANTES PARA CoA");
+        
         return false;
     }
     
@@ -106,9 +95,7 @@ function execute_coa($mac, $ap_ip) {
     return $coa_success;
 }
 
-// ----------------------------
-// 🔌 Database Connection
-// ----------------------------
+/// CONECTANDOME A LA BASE DE DATOS
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 try {
     $conn = new mysqli($host, $user, $pass, $db);
@@ -119,9 +106,7 @@ try {
     die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($e->getMessage()) . "</div>");
 }
 
-// ----------------------------
-// 🧾 Get Parameters
-// ----------------------------
+// JALAMOS LOS PARAMETROS
 $mac_raw  = $_GET['mac']    ?? $_POST['mac']    ?? '';
 $ip_raw   = $_GET['ip']     ?? $_POST['ip']     ?? '';
 $url_raw  = $_GET['url']    ?? $_POST['url']    ?? '';
@@ -132,12 +117,9 @@ $mac_norm = normalize_mac($mac_raw);
 $ap_norm  = normalize_mac($ap_raw);
 $ip       = trim($ip_raw);
 
-// Debug de parámetros
 error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP: '$ip'");
 
-// ----------------------------
-// 📥 Process Form Submission
-// ----------------------------
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     error_log("📨 PROCESANDO FORMULARIO POST");
     
@@ -156,7 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     error_log("📝 DATOS FORMULARIO: $nombre, MAC: $mac_norm, IP: $ip");
 
-    // Validar términos y condiciones
+// TERMINOS Y CONDICIONES
     if (!$terminos) {
         error_log("❌ Términos y condiciones no aceptados");
         die("<div class='error'>❌ Debes aceptar los términos y condiciones para registrarte.</div>");
@@ -191,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $check_radcheck->close();
 
-        // 2) INSERT INTO clients
+        // INSERTAR A CLIENTES
         $stmt_clients = $conn->prepare("
             INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
             VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -202,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt_clients->close();
         error_log("✅ CLIENTE INSERTADO con ID: $client_id");
 
-        // 3) INSERT INTO radcheck
+        // 3) INSERT LA MAC A RADCHECK
         $stmt_radcheck = $conn->prepare("
             INSERT INTO radcheck (username, attribute, op, value)
             VALUES (?, 'Auth-Type', ':=', 'Accept')
@@ -244,12 +226,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Verificar estado actual de la MAC
+// VERIFICAR SI LA AMC ES NUEVA O YA EXISTE
 $mac_status = 'new';
 $client_exists = false;
 if ($mac_norm !== '') {
     try {
-        // Verificar en radcheck
+        // VERIFICACMOS EXISTENCIA EN RADCHECK
         $check_radcheck_display = $conn->prepare("
             SELECT id FROM radcheck 
             WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
@@ -263,7 +245,7 @@ if ($mac_norm !== '') {
         }
         $check_radcheck_display->close();
         
-        // Verificar en clients
+        // VERIFICAR CLIENTES
         $check_clients_display = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
         $check_clients_display->bind_param("s", $mac_norm);
         $check_clients_display->execute();
@@ -279,8 +261,7 @@ if ($mac_norm !== '') {
     }
 }
 
-// Debug final
-error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exists: " . ($client_exists ? 'YES' : 'NO'));
+
 ?>
 
 <!DOCTYPE html>
@@ -320,7 +301,7 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
     <img src="gonetlogo.png" alt="GoNet Logo" class="top-image">
 
     <div class="form-container">
-        <h2>📡 Registro para Wi-Fi</h2>
+        <h2> Registro para Wi-Fi</h2>
 
         <?php if ($mac_norm === ''): ?>
             <div class="error">
@@ -384,16 +365,9 @@ error_log("📊 ESTADO FINAL - MAC: $mac_norm, Status: $mac_status, Client exist
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
 
-            <div class="mac-display">
-                <strong>🔧 Dispositivo MAC:</strong><br>
-                <code><?php echo htmlspecialchars($mac_norm); ?></code>
-            </div>
+          
 
-            <?php if ($ip !== ''): ?>
-                <div class="info-display">
-                    <strong>🌐 Dirección IP:</strong> <?php echo htmlspecialchars($ip); ?>
-                </div>
-            <?php endif; ?>
+           
 
             <button type="submit" id="submitBtn">
                 <?php echo $mac_status === 'registered' ? '✅ Conectar Ahora' : '🚀 Registrar y Conectar'; ?>
