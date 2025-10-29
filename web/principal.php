@@ -47,8 +47,6 @@ function redirect_to_bienvenido($mac_norm, $ip) {
 
 /**
  * Lanza el CoA en background (&) para no bloquear la respuesta al usuario.
- * Usa /tmp/coa_async.log para logging de radclient.
- * Pasa preferentemente la IP del AP/Controlador en $ap_ip (no la IP del cliente).
  */
 function start_coa_async($mac, $ap_ip) {
     if (empty($mac) || empty($ap_ip)) {
@@ -59,10 +57,6 @@ function start_coa_async($mac, $ap_ip) {
     $coa_secret = "telecom";
     $coa_port   = "4325";
 
-    // Construir el comando sin bloquear la respuesta
-    // - Usamos sh -c para redirecciones y &
-    // - Log en /tmp/coa_async.log
-    // - radclient con -x para ver trazas en log
     $payload = sprintf('User-Name=%s', addslashes($mac));
     $cmd = sprintf(
         'sh -c \'echo "%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s >> /tmp/coa_async.log 2>&1 &\'',
@@ -75,6 +69,48 @@ function start_coa_async($mac, $ap_ip) {
     error_log("🚀 Lanzando CoA en background: $cmd");
     exec($cmd); // no bloquea
     return true;
+}
+
+/** ===================== Validaciones de Campos (Servidor) ===================== */
+/** ✅ Cédula ecuatoriana: 10 dígitos, provincia 01-24, tercer dígito < 6, y dígito verificador */
+function validarCedulaEC(string $cedula): bool {
+    if (!preg_match('/^\d{10}$/', $cedula)) return false;
+
+    $prov = (int)substr($cedula, 0, 2);
+    if ($prov < 1 || $prov > 24) return false;
+
+    $tercer = (int)$cedula[2];
+    if ($tercer >= 6) return false;
+
+    $coef = [2,1,2,1,2,1,2,1,2];
+    $suma = 0;
+    for ($i = 0; $i < 9; $i++) {
+        $prod = (int)$cedula[$i] * $coef[$i];
+        if ($prod >= 10) $prod -= 9;
+        $suma += $prod;
+    }
+    $dv = (10 - ($suma % 10)) % 10;
+    return $dv === (int)$cedula[9];
+}
+
+/** ✅ Teléfono: debe empezar en 09 y tener 10 dígitos */
+function validarTelefonoEC(string $tel): bool {
+    $tel = preg_replace('/\D+/', '', $tel);
+    return preg_match('/^09\d{8}$/', $tel) === 1;
+}
+
+/** ✅ Email: formato y dominio existente (MX o A) */
+function validarEmailReal(string $email): bool {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
+    $dom = substr(strrchr($email, "@"), 1);
+    if (!$dom) return false;
+
+    // checkdnsrr puede no estar disponible en todos los contenedores; probamos MX y luego A
+    $mxOk = function_exists('checkdnsrr') ? checkdnsrr($dom, 'MX') : false;
+    $aOk  = function_exists('checkdnsrr') ? checkdnsrr($dom, 'A')  : false;
+
+    // Si no se puede chequear DNS, al menos pasa formato; si se puede, requiere MX o A
+    return (function_exists('checkdnsrr')) ? ($mxOk || $aOk) : true;
 }
 
 /** ============= Conexión a la Base de Datos ============= */
@@ -94,12 +130,9 @@ try {
 $mac_raw  = $_GET['mac']    ?? $_POST['mac']    ?? '';
 $ip_raw   = $_GET['ip']     ?? $_POST['ip']     ?? '';
 $url_raw  = $_GET['url']    ?? $_POST['url']    ?? '';
-$ap_raw   = $_GET['ap_mac'] ?? $_POST['ap_mac'] ?? ''; // por si lo usas
+$ap_raw   = $_GET['ap_mac'] ?? $_POST['ap_mac'] ?? '';
 $essid    = $_GET['essid']  ?? $_POST['essid']  ?? '';
 
-/* IP del AP/Controlador para CoA. Idealmente pásala como ap_ip en GET/POST.
- * Si no llega, usamos un fallback (ajústalo a tu entorno).
- */
 $ap_ip_default = '192.168.0.9';
 $ap_ip_input   = $_GET['ap_ip'] ?? $_POST['ap_ip'] ?? '';
 $ap_ip         = trim($ap_ip_input) !== '' ? trim($ap_ip_input) : $ap_ip_default;
@@ -108,6 +141,16 @@ $mac_norm = normalize_mac($mac_raw);
 $ap_norm  = normalize_mac($ap_raw);
 $ip       = trim($ip_raw);
 
+/** Para mensajes de error por campo (servidor) */
+$errors = [
+    'nombre'   => '',
+    'apellido' => '',
+    'cedula'   => '',
+    'telefono' => '',
+    'email'    => '',
+    'terminos' => ''
+];
+
 error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP Cliente: '$ip', AP_IP: '$ap_ip'");
 
 /** ============= Manejo POST (Registro/Conexión) ============= */
@@ -115,108 +158,119 @@ error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP Cliente: '$ip', AP_IP: '$ap_i
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     error_log("📨 PROCESANDO FORMULARIO POST");
 
-    $nombre   = $_POST['nombre']   ?? '';
-    $apellido = $_POST['apellido'] ?? '';
-    $cedula   = $_POST['cedula']   ?? '';
-    $telefono = $_POST['telefono'] ?? '';
-    $email    = $_POST['email']    ?? '';
+    $nombre   = trim($_POST['nombre']   ?? '');
+    $apellido = trim($_POST['apellido'] ?? '');
+    $cedula   = preg_replace('/\D+/', '', $_POST['cedula'] ?? '');
+    $telefono = preg_replace('/\D+/', '', $_POST['telefono'] ?? '');
+    $email    = trim($_POST['email']    ?? '');
     $terminos = isset($_POST['terminos']) ? 1 : 0;
 
     $mac_post   = $_POST['mac']    ?? '';
     $ip_post    = $_POST['ip']     ?? '';
-    $ap_ip_post = $_POST['ap_ip']  ?? $ap_ip; // permite oculto si quieres
+    $ap_ip_post = $_POST['ap_ip']  ?? $ap_ip;
 
     $mac_norm   = normalize_mac($mac_post);
     $ip         = trim($ip_post);
     $ap_ip      = trim($ap_ip_post) !== '' ? trim($ap_ip_post) : $ap_ip;
 
-    error_log("📝 DATOS FORM: {$nombre} {$apellido}, MAC: $mac_norm, IP: $ip, AP_IP: $ap_ip");
+    // ✅ Validaciones servidor
+    if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
+    if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
 
-    // Términos
+    if (!validarCedulaEC($cedula)) {
+        $errors['cedula'] = 'Cédula inválida. Verifica los 10 dígitos y el dígito verificador.';
+    }
+    if (!validarTelefonoEC($telefono)) {
+        $errors['telefono'] = 'El teléfono debe empezar con 09 y tener 10 dígitos (ej. 09XXXXXXXX).';
+    }
+    if (!validarEmailReal($email)) {
+        $errors['email'] = 'Correo inválido o dominio inexistente. Verifica el email.';
+    }
     if (!$terminos) {
-        error_log("❌ Términos y condiciones no aceptados");
-        die("<div class='error'>❌ Debes aceptar los términos y condiciones para registrarte.</div>");
+        $errors['terminos'] = 'Debes aceptar los términos y condiciones.';
     }
-
     if ($mac_norm === '') {
+        // Error general, pero lo mostramos arriba también si quieres
         error_log("❌ MAC address vacía o inválida");
-        die("<div class='error'>❌ MAC address missing or invalid.</div>");
     }
 
-    try {
-        $conn->begin_transaction();
-        error_log("🔄 INICIANDO TRANSACCIÓN BD");
+    $hayErrores = array_filter($errors, fn($e) => $e !== '');
 
-        // 1) Verificar si ya existe en radcheck
-        $check_radcheck = $conn->prepare("
-            SELECT id FROM radcheck 
-            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
-        ");
-        $check_radcheck->bind_param("s", $mac_norm);
-        $check_radcheck->execute();
-        $check_radcheck->store_result();
+    if (!$hayErrores) {
+        try {
+            $conn->begin_transaction();
+            error_log("🔄 INICIANDO TRANSACCIÓN BD");
 
-        if ($check_radcheck->num_rows > 0) {
+            // 1) Verificar si ya existe en radcheck
+            $check_radcheck = $conn->prepare("
+                SELECT id FROM radcheck 
+                WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
+            ");
+            $check_radcheck->bind_param("s", $mac_norm);
+            $check_radcheck->execute();
+            $check_radcheck->store_result();
+
+            if ($check_radcheck->num_rows > 0) {
+                $check_radcheck->close();
+                $conn->commit();
+
+                error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, lanzando CoA en background...");
+                start_coa_async($mac_norm, $ap_ip);
+                redirect_to_bienvenido($mac_norm, $ip);
+            }
             $check_radcheck->close();
+
+            // 2) Insertar en clients
+            $stmt_clients = $conn->prepare("
+                INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+            ");
+            $stmt_clients->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
+            $stmt_clients->execute();
+            $client_id = $conn->insert_id;
+            $stmt_clients->close();
+            error_log("✅ CLIENTE INSERTADO con ID: $client_id");
+
+            // 3) Insertar en radcheck (auto-aceptar por MAC)
+            $stmt_radcheck = $conn->prepare("
+                INSERT INTO radcheck (username, attribute, op, value)
+                VALUES (?, 'Auth-Type', ':=', 'Accept')
+            ");
+            $stmt_radcheck->bind_param("s", $mac_norm);
+            $stmt_radcheck->execute();
+            $radcheck_id = $conn->insert_id;
+            $stmt_radcheck->close();
+            error_log("✅ RADCHECK INSERTADO con ID: $radcheck_id");
+
             $conn->commit();
+            error_log("✅ TRANSACCIÓN BD COMPLETADA");
 
-            error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, lanzando CoA en background...");
+            // 4) CoA + redirección
             start_coa_async($mac_norm, $ap_ip);
             redirect_to_bienvenido($mac_norm, $ip);
+
+        } catch (Exception $e) {
+            error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
+            if ($conn->errno) {
+                $conn->rollback();
+                error_log("🔄 TRANSACCIÓN REVERTIDA");
+            }
+
+            if ($conn->errno == 1062) {
+                // Duplicado
+                start_coa_async($mac_norm, $ap_ip);
+                redirect_to_bienvenido($mac_norm, $ip);
+            } else {
+                die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
+            }
         }
-        $check_radcheck->close();
-
-        // 2) Insertar en clients
-        $stmt_clients = $conn->prepare("
-            INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
-        ");
-        $stmt_clients->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
-        $stmt_clients->execute();
-        $client_id = $conn->insert_id;
-        $stmt_clients->close();
-        error_log("✅ CLIENTE INSERTADO con ID: $client_id");
-
-        // 3) Insertar en radcheck (auto-aceptar por MAC)
-        $stmt_radcheck = $conn->prepare("
-            INSERT INTO radcheck (username, attribute, op, value)
-            VALUES (?, 'Auth-Type', ':=', 'Accept')
-        ");
-        $stmt_radcheck->bind_param("s", $mac_norm);
-        $stmt_radcheck->execute();
-        $radcheck_id = $conn->insert_id;
-        $stmt_radcheck->close();
-        error_log("✅ RADCHECK INSERTADO con ID: $radcheck_id");
-
-        $conn->commit();
-        error_log("✅ TRANSACCIÓN BD COMPLETADA");
-
-        // 4) Lanzar CoA en background (no bloquea UX)
-        error_log("🎉 REGISTRO COMPLETADO, lanzando CoA en background...");
-        start_coa_async($mac_norm, $ap_ip);
-
-        // 5) Redirigir de inmediato
-        error_log("🔄 REDIRIGIENDO A BIENVENIDO.PHP");
-        redirect_to_bienvenido($mac_norm, $ip);
-
-    } catch (Exception $e) {
-        error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
-        error_log("❌ CÓDIGO ERROR: " . $conn->errno);
-        error_log("❌ MENSAJE ERROR: " . $conn->error);
-
-        if ($conn->errno) {
-            $conn->rollback();
-            error_log("🔄 TRANSACCIÓN REVERTIDA");
-        }
-
-        if ($conn->errno == 1062) {
-            // Duplicado: ya existe. Lanza CoA en background y redirige
-            error_log("⚠️ MAC $mac_norm YA EXISTE (1062), lanzando CoA en background...");
-            start_coa_async($mac_norm, $ap_ip);
-            redirect_to_bienvenido($mac_norm, $ip);
-        } else {
-            die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
-        }
+    } else {
+        // Guardar valores saneados para re-rellenar el formulario
+        $_POST['nombre']   = $nombre;
+        $_POST['apellido'] = $apellido;
+        $_POST['cedula']   = $cedula;
+        $_POST['telefono'] = $telefono;
+        $_POST['email']    = $email;
     }
 }
 
@@ -267,12 +321,14 @@ if ($mac_norm !== '') {
         .top-image, .bottom-image { width: 100%; max-width: 400px; border-radius: 15px; margin: 10px 0; box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
         .form-container { background: white; padding: 30px 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); width: 100%; max-width: 450px; margin: 20px 0; }
         h2 { color: #2c3e50; text-align: center; margin-bottom: 25px; font-size: 1.8rem; font-weight: 600; }
-        .form-group { margin-bottom: 20px; }
-        input { width: 100%; padding: 15px; margin: 8px 0; border: 2px solid #e1e8ed; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; }
+        .form-group { margin-bottom: 16px; }
+        label { display:block; font-weight:600; margin-bottom:6px; }
+        input { width: 100%; padding: 12px; border: 2px solid #e1e8ed; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; }
         input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
-        button { width: 100%; padding: 16px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-size: 1.1rem; font-weight: 600; cursor: pointer; margin-top: 15px; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); }
+        button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-size: 1.05rem; font-weight: 600; cursor: pointer; margin-top: 10px; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); }
         button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
         .error { background: #ffebee; color: #c62828; padding: 12px; border-radius: 10px; margin: 15px 0; text-align: center; font-size: 0.9rem; border-left: 4px solid #c62828; }
+        .field-error { color:#c62828; font-size:0.85rem; margin-top:6px; }
         .mac-display { background: #f8f9fa; padding: 15px; border-radius: 12px; margin: 15px 0; font-size: 0.95rem; color: #2c3e50; text-align: center; word-wrap: break-word; border: 2px solid #e9ecef; }
         .info-display { background: #e3f2fd; padding: 12px; border-radius: 10px; margin: 10px 0; font-size: 0.9rem; color: #1565c0; text-align: center; border-left: 4px solid #2196f3; }
         .status-info { background: #e8f5e8; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 0.95rem; color: #2e7d32; text-align: center; border-left: 4px solid #4caf50; font-weight: 500; }
@@ -316,46 +372,70 @@ if ($mac_norm !== '') {
         <?php endif; ?>
 
         <?php if ($mac_norm !== ''): ?>
-        <form method="POST" autocomplete="on" id="registrationForm">
+        <form method="POST" autocomplete="on" id="registrationForm" novalidate>
             <div class="form-group">
                 <label class="required">Nombre</label>
                 <input type="text" name="nombre" placeholder="Tu nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
+                <?php if (!empty($errors['nombre'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['nombre']); ?></div><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="required">Apellido</label>
                 <input type="text" name="apellido" placeholder="Tu apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
+                <?php if (!empty($errors['apellido'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['apellido']); ?></div><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="required">Cédula</label>
-                <input type="text" name="cedula" placeholder="Número de cédula" required value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
+                <input
+                    type="text"
+                    name="cedula"
+                    placeholder="Número de cédula (10 dígitos)"
+                    required
+                    inputmode="numeric"
+                    pattern="\d{10}"
+                    value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
+                <?php if (!empty($errors['cedula'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['cedula']); ?></div><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="required">Teléfono</label>
-                <input type="text" name="telefono" placeholder="Número de teléfono" required value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
+                <input
+                    type="tel"
+                    name="telefono"
+                    placeholder="09XXXXXXXX"
+                    required
+                    inputmode="tel"
+                    pattern="^09\d{8}$"
+                    value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
+                <?php if (!empty($errors['telefono'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['telefono']); ?></div><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="required">Email</label>
-                <input type="email" name="email" placeholder="correo@ejemplo.com" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+                <input
+                    type="email"
+                    name="email"
+                    placeholder="correo@ejemplo.com"
+                    required
+                    value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+                <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['email']); ?></div><?php endif; ?>
             </div>
 
             <div class="terminos-container">
                 <div class="terminos-checkbox">
-                    <input type="checkbox" name="terminos" id="terminos" required>
+                    <input type="checkbox" name="terminos" id="terminos" <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?> required>
                     <label for="terminos" class="terminos-text">
                         Acepto los <a href="terminos.html" target="_blank" class="terminos-link">Términos y Condiciones</a> 
                         y la <a href="privacidad.html" target="_blank" class="terminos-link">Política de Privacidad</a> 
                         de GoNet Wi-Fi.
                     </label>
                 </div>
+                <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['terminos']); ?></div><?php endif; ?>
             </div>
 
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
-            <!-- Si quieres pasar el AP IP como hidden para POST persistente, descomenta: -->
             <!-- <input type="hidden" name="ap_ip" value="<?php echo htmlspecialchars($ap_ip); ?>"> -->
 
             <button type="submit" id="submitBtn">
@@ -368,18 +448,98 @@ if ($mac_norm !== '') {
     <img src="banner.png" alt="Banner" class="bottom-image">
 
     <script>
-        document.getElementById('registrationForm')?.addEventListener('submit', function(e) {
-            const terminosCheckbox = document.getElementById('terminos');
-            if (!terminosCheckbox.checked) {
-                e.preventDefault();
-                alert('Debes aceptar los términos y condiciones para continuar.');
-                terminosCheckbox.focus();
-                return false;
+        // ✅ Validación rápida en cliente con mensajes bajo cada input
+        const form = document.getElementById('registrationForm');
+        const fields = {
+            nombre:   { el: null, err: null },
+            apellido: { el: null, err: null },
+            cedula:   { el: null, err: null },
+            telefono: { el: null, err: null },
+            email:    { el: null, err: null },
+            terminos: { el: null, err: null },
+        };
+
+        function attach(fieldName) {
+            const input = form?.querySelector(`[name="${fieldName}"]`);
+            const errDiv = input?.parentElement?.querySelector('.field-error') || null;
+            fields[fieldName].el = input;
+            fields[fieldName].err = errDiv;
+        }
+
+        if (form) {
+            Object.keys(fields).forEach(attach);
+
+            function setError(field, msg) {
+                if (!fields[field]) return false;
+                const { el, err } = fields[field];
+                if (err) err.textContent = msg || '';
+                if (el) el.setAttribute('aria-invalid', msg ? 'true' : 'false');
+                return !!msg;
             }
-            const submitBtn = document.getElementById('submitBtn');
-            submitBtn.innerHTML = '⏳ Procesando...';
-            submitBtn.disabled = true;
-        });
+
+            function validarCedulaEC(ced) {
+                if (!/^\d{10}$/.test(ced)) return false;
+                const prov = parseInt(ced.slice(0,2),10);
+                if (prov < 1 || prov > 24) return false;
+                const t = parseInt(ced[2],10);
+                if (t >= 6) return false;
+                const coef = [2,1,2,1,2,1,2,1,2];
+                let suma = 0;
+                for (let i=0;i<9;i++){
+                    let prod = parseInt(ced[i],10) * coef[i];
+                    if (prod >= 10) prod -= 9;
+                    suma += prod;
+                }
+                const dv = (10 - (suma % 10)) % 10;
+                return dv === parseInt(ced[9],10);
+            }
+
+            function validarTelefonoEC(tel) {
+                return /^09\d{8}$/.test(tel.replace(/\D+/g,''));
+            }
+
+            function validarEmailBasico(mail) {
+                // Cliente: solo formato; el servidor hace DNS.
+                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail);
+            }
+
+            function validateAll() {
+                let hasErrors = false;
+                // Nombre
+                hasErrors = setError('nombre',   fields.nombre.el.value.trim() ? '' : 'Ingresa tu nombre.') || hasErrors;
+                // Apellido
+                hasErrors = setError('apellido', fields.apellido.el.value.trim() ? '' : 'Ingresa tu apellido.') || hasErrors;
+                // Cédula
+                const ced = fields.cedula.el.value.replace(/\D+/g,'');
+                hasErrors = setError('cedula', validarCedulaEC(ced) ? '' : 'Cédula inválida. Verifica los 10 dígitos y el dígito verificador.') || hasErrors;
+                // Teléfono
+                const tel = fields.telefono.el.value.replace(/\D+/g,'');
+                hasErrors = setError('telefono', validarTelefonoEC(tel) ? '' : 'El teléfono debe empezar con 09 y tener 10 dígitos (ej. 09XXXXXXXX).') || hasErrors;
+                // Email
+                hasErrors = setError('email', validarEmailBasico(fields.email.el.value.trim()) ? '' : 'Correo inválido. Verifica el formato.') || hasErrors;
+                // Términos
+                hasErrors = setError('terminos', fields.terminos.el.checked ? '' : 'Debes aceptar los términos y condiciones.') || hasErrors;
+                return !hasErrors;
+            }
+
+            // Validación en tiempo real
+            ['input','blur','change'].forEach(evt => {
+                form.addEventListener(evt, (e) => {
+                    if (!(e.target && e.target.name)) return;
+                    validateAll();
+                }, true);
+            });
+
+            form.addEventListener('submit', function(e) {
+                if (!validateAll()) {
+                    e.preventDefault();
+                    return false;
+                }
+                const submitBtn = document.getElementById('submitBtn');
+                submitBtn.innerHTML = '⏳ Procesando...';
+                submitBtn.disabled = true;
+            });
+        }
     </script>
 
 </body>
