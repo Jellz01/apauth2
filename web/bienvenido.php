@@ -339,18 +339,7 @@ $redirect_url = 'success.php';
         </div>
         <?php endif; ?>
         
-        <?php if (!empty($mac) && isset($session_data)): ?>
-        <div class="info-box">
-            <strong>📱 Sesión detectada:</strong>
-            MAC: <?php echo htmlspecialchars($session_data['callingstationid']); ?><br>
-            Session ID: <?php echo htmlspecialchars(substr($session_data['acctsessionid'], 0, 16)); ?>...
-        </div>
-        <?php elseif (!empty($mac)): ?>
-        <div class="info-box">
-            <strong>📱 Dispositivo:</strong>
-            <?php echo htmlspecialchars($mac); ?>
-        </div>
-        <?php endif; ?>
+       
         
         <div style="margin-top: 20px; font-size: 0.85rem; color: #999;">
             Logs: <code><?php echo $log_file; ?></code>
