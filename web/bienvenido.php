@@ -1,5 +1,5 @@
 <?php
-// bienvenido.php — Loading + CoA async + check de Internet (minimal)
+// bienvenido.php — Loading + CoA async + check de Internet (sin redirección)
 session_start();
 ini_set('display_errors',1); error_reporting(E_ALL);
 
@@ -92,32 +92,61 @@ $_SESSION['coa_executed'] = true;
     color:#111;
   }
   .card {
-    background:#fff; width:min(92vw,460px);
+    background:#fff; width:min(92vw,520px);
     padding:36px 28px; border-radius:18px;
     box-shadow:0 18px 55px rgba(0,0,0,.18); text-align:center;
   }
+  .top { display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .logo { width:180px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,.18); }
   .spinner {
     width:64px; height:64px; border:6px solid #eef3ff;
     border-top:6px solid #667eea; border-radius:50%;
-    margin:4px auto 18px; animation:spin 1s linear infinite;
+    margin:6px auto 18px; animation:spin 1s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg) } }
-  h1 { font-size:1.25rem; font-weight:700; }
+  h1 { font-size:1.25rem; font-weight:800; }
   p  { margin-top:8px; color:#555; }
-  .ok { display:none; font-size:1.3rem; font-weight:800; color:#2e7d32; margin-top:6px; }
-  .btn { display:none; margin-top:16px; background:#667eea; color:#fff;
-         padding:10px 16px; border-radius:10px; text-decoration:none; font-weight:600; }
-  .logo { width:180px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,.18); margin-bottom:16px; }
+  .ok { display:none; font-size:1.35rem; font-weight:900; color:#2e7d32; margin-top:4px; }
+  .btn { display:none; margin-top:14px; background:#667eea; color:#fff;
+         padding:10px 16px; border-radius:10px; text-decoration:none; font-weight:700; }
+  .features {
+    text-align:left; margin:14px auto 0; padding:12px; border-radius:12px;
+    background:#f8f9ff; border:1px solid #e6e9ff; color:#384466; line-height:1.45;
+  }
+  .features h3 { margin-bottom:6px; font-size:1rem; color:#2c3e50; }
+  .features ul { margin-left:18px; }
+  .features li { margin:4px 0; }
+  .note { font-size:.85rem; color:#6b7280; margin-top:8px; }
 </style>
 </head>
 <body>
   <div class="card">
-    <img class="logo" src="gonetlogo.png" alt="GoNet" />
-    <div class="spinner" id="sp"></div>
-    <h1 id="title">Conectando…</h1>
-    <p id="sub">Estamos habilitando tu acceso. Esto tomará unos segundos.</p>
+    <div class="top">
+      <img class="logo" src="gonetlogo.png" alt="GoNet" />
+      <div class="spinner" id="sp"></div>
+      <h1 id="title">Conectando…</h1>
+      <p id="sub">Estamos habilitando tu acceso. Esto tomará unos segundos.</p>
+    </div>
+
+    <!-- Info “qué puedes hacer en esta red” mientras carga -->
+    <div class="features" id="features">
+      <h3>¿Qué puedes hacer en esta red?</h3>
+      <ul>
+        <li>Navegar por la web y usar redes sociales sin límites básicos.</li>
+        <li>WhatsApp/Telegram, videollamadas y correo sin bloqueo.</li>
+        <li>Streaming en calidad estándar/HD según congestión.</li>
+        <li>Actualizaciones del sistema y apps en segundo plano.</li>
+      </ul>
+      <div class="note">
+        <strong>Políticas:</strong> uso responsable, sin torrents/descargas ilegales.
+        Trafico priorizado para navegación, mensajería y educación.
+      </div>
+    </div>
+
+    <!-- Mensaje de OK cuando ya hay Internet -->
     <div class="ok" id="ok">Bienvenidos a la red GoNet</div>
-    <a class="btn" id="go" href="success.php">Continuar</a>
+    <!-- Botón para que el usuario decida a dónde ir (sin redirección automática) -->
+    <a class="btn" id="go" href="#" target="_blank" rel="noopener">Comenzar a navegar</a>
   </div>
 
 <script>
@@ -135,15 +164,18 @@ function checkOnce(){
   img.onload = () => {
     if (ready) return;
     ready = true;
-    // UI: mostrar mensaje de bienvenida y botón / redirigir
+
+    // UI: pasar a estado "bienvenidos"
     document.getElementById('sp').style.display = 'none';
     document.getElementById('title').style.display = 'none';
     document.getElementById('sub').style.display = 'none';
+    document.getElementById('features').style.display = 'none';
+
     document.getElementById('ok').style.display = 'block';
     const go = document.getElementById('go');
     go.style.display = 'inline-block';
-    // Redirección automática tras 1.2 s (opcional)
-    setTimeout(()=>{ window.location.href = 'success.php'; }, 1200);
+    // No redirigimos automáticamente. Damos control al usuario:
+    go.href = 'https://www.google.com/'; // o tu página de inicio preferida
   };
   img.onerror = () => { /* reintentar luego */ };
   img.src = probes[i % probes.length] + '?_=' + Date.now();
