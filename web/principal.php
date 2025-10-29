@@ -1,14 +1,17 @@
 <?php
 session_start();
 
+
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
+
 
 $host = "mysql";
 $user = "radius";
 $pass = "radpass";
 $db   = "radius";
+
 
 function normalize_mac($mac_raw) {
     if (empty($mac_raw)) return '';
@@ -16,35 +19,83 @@ function normalize_mac($mac_raw) {
     return strtoupper($hex);
 }
 
-function redirect_to_success($mac_norm, $ip) {
-    error_log("🎯 REDIRIGIENDO A SUCCESS.PHP CON MAC: $mac_norm");
+function redirect_to_bienvenido($mac_norm, $ip) {
+    error_log("🎯 REDIRIGIENDO A BIENVENIDO.PHP CON MAC: $mac_norm");
     
+   
     $_SESSION['registration_mac'] = $mac_norm;
     $_SESSION['registration_ip'] = $ip;
-    $_SESSION['coa_pending'] = true;
-    $_SESSION['registration_time'] = time();
+    $_SESSION['coa_executed'] = false;
     
-    $success_url = 'success.php';
+    $bienvenido_url = 'bienvenido.php';
     
     if (!headers_sent()) {
-        header("Location: " . $success_url);
+        header("Location: " . $bienvenido_url);
         exit;
     } else {
         echo '<!DOCTYPE html>
         <html>
         <head>
-            <meta http-equiv="refresh" content="0;url=' . htmlspecialchars($success_url) . '">
+            <meta http-equiv="refresh" content="0;url=' . htmlspecialchars($bienvenido_url) . '">
         </head>
         <body>
-            <p>Redireccionando... <a href="' . htmlspecialchars($success_url) . '">Click aquí</a></p>
-            <script>window.location.href = "' . htmlspecialchars($success_url) . '";</script>
+            <p>Redireccionando... <a href="' . htmlspecialchars($bienvenido_url) . '">Click aquí</a></p>
+            <script>window.location.href = "' . htmlspecialchars($bienvenido_url) . '";</script>
         </body>
         </html>';
         exit;
     }
 }
 
-// CONECTAR A LA BASE DE DATOS
+//  CONFIGURACIONES DEL COA 
+function execute_coa($mac, $ap_ip) {
+    
+    
+    $coa_secret = "telecom";
+    $coa_port = "4325";
+    
+    if (empty($mac) || empty($ap_ip)) {
+        
+        return false;
+    }
+    
+    $command = sprintf(
+        'echo "User-Name=%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s 2>&1',
+        escapeshellarg($mac),
+        escapeshellarg($ap_ip),
+        $coa_port,
+        escapeshellarg($coa_secret)
+    );
+    
+    error_log("🖥️ COMANDO CoA: $command");
+    
+    $output = [];
+    $return_var = 0;
+    exec($command, $output, $return_var);
+    
+    $coa_output = implode(" | ", $output);
+    error_log("📋 OUTPUT CoA: " . $coa_output);
+    
+    $coa_success = false;
+    if ($return_var === 0) {
+        if (strpos($coa_output, "Received Disconnect-ACK") !== false) {
+            error_log("✅ CoA EXITOSO - Disconnect-ACK recibido");
+            $coa_success = true;
+        } else if (strpos($coa_output, "Received CoA-ACK") !== false) {
+            error_log("✅ CoA EXITOSO - CoA-ACK recibido");
+            $coa_success = true;
+        } else {
+            error_log("⚠️ CoA EJECUTADO pero respuesta no esperada");
+            $coa_success = true;
+        }
+    } else {
+        error_log("❌ ERROR EN CoA - Código: $return_var");
+    }
+    
+    return $coa_success;
+}
+
+/// CONECTANDOME A LA BASE DE DATOS
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 try {
     $conn = new mysqli($host, $user, $pass, $db);
@@ -55,7 +106,7 @@ try {
     die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($e->getMessage()) . "</div>");
 }
 
-// OBTENER PARÁMETROS
+// JALAMOS LOS PARAMETROS
 $mac_raw  = $_GET['mac']    ?? $_POST['mac']    ?? '';
 $ip_raw   = $_GET['ip']     ?? $_POST['ip']     ?? '';
 $url_raw  = $_GET['url']    ?? $_POST['url']    ?? '';
@@ -68,7 +119,7 @@ $ip       = trim($ip_raw);
 
 error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP: '$ip'");
 
-// PROCESAR FORMULARIO
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     error_log("📨 PROCESANDO FORMULARIO POST");
     
@@ -87,7 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     error_log("📝 DATOS FORMULARIO: $nombre, MAC: $mac_norm, IP: $ip");
 
-    // VALIDAR TÉRMINOS
+// TERMINOS Y CONDICIONES
     if (!$terminos) {
         error_log("❌ Términos y condiciones no aceptados");
         die("<div class='error'>❌ Debes aceptar los términos y condiciones para registrarte.</div>");
@@ -102,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $conn->begin_transaction();
         error_log("🔄 INICIANDO TRANSACCIÓN BD");
 
-        // VERIFICAR SI LA MAC YA EXISTE EN RADCHECK
+        // 1) VERIFICAR SI LA MAC YA EXISTE EN RADCHECK
         $check_radcheck = $conn->prepare("
             SELECT id FROM radcheck 
             WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
@@ -115,12 +166,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $check_radcheck->close();
             $conn->commit();
             
-            error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck");
-            redirect_to_success($mac_norm, $ip);
+            error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, ejecutando CoA...");
+            
+            execute_coa($mac_norm, $ip);
+            redirect_to_bienvenido($mac_norm, $ip);
         }
         $check_radcheck->close();
 
-        // INSERTAR EN CLIENTES
+        // INSERTAR A CLIENTES
         $stmt_clients = $conn->prepare("
             INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
             VALUES (?, ?, ?, ?, ?, ?, 1)
@@ -131,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt_clients->close();
         error_log("✅ CLIENTE INSERTADO con ID: $client_id");
 
-        // INSERTAR EN RADCHECK
+        // 3) INSERT LA MAC A RADCHECK
         $stmt_radcheck = $conn->prepare("
             INSERT INTO radcheck (username, attribute, op, value)
             VALUES (?, 'Auth-Type', ':=', 'Accept')
@@ -145,9 +198,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $conn->commit();
         error_log("✅ TRANSACCIÓN BD COMPLETADA");
         
-        // REDIRIGIR INMEDIATAMENTE - El CoA se ejecutará en background
-        error_log("🔄 REDIRIGIENDO A SUCCESS.PHP - CoA se ejecutará en background");
-        redirect_to_success($mac_norm, $ip);
+        // 4) EJECUTAR CoA
+        error_log("🎉 REGISTRO COMPLETADO, EJECUTANDO CoA...");
+        execute_coa($mac_norm, $ip);
+        
+        // 5) REDIRIGIR
+        error_log("🔄 REDIRIGIENDO A BIENVENIDO.PHP");
+        redirect_to_bienvenido($mac_norm, $ip);
 
     } catch (Exception $e) {
         error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
@@ -160,19 +217,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         if ($conn->errno == 1062) {
-            error_log("⚠️ MAC $mac_norm YA EXISTE (error 1062)");
-            redirect_to_success($mac_norm, $ip);
+            error_log("⚠️ MAC $mac_norm YA EXISTE (error 1062), ejecutando CoA...");
+            execute_coa($mac_norm, $ip);
+            redirect_to_bienvenido($mac_norm, $ip);
         } else {
             die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
         }
     }
 }
 
-// VERIFICAR ESTADO DE LA MAC
+// VERIFICAR SI LA AMC ES NUEVA O YA EXISTE
 $mac_status = 'new';
 $client_exists = false;
 if ($mac_norm !== '') {
     try {
+        // VERIFICACMOS EXISTENCIA EN RADCHECK
         $check_radcheck_display = $conn->prepare("
             SELECT id FROM radcheck 
             WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
@@ -186,6 +245,7 @@ if ($mac_norm !== '') {
         }
         $check_radcheck_display->close();
         
+        // VERIFICAR CLIENTES
         $check_clients_display = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
         $check_clients_display->bind_param("s", $mac_norm);
         $check_clients_display->execute();
@@ -200,6 +260,7 @@ if ($mac_norm !== '') {
         error_log("⚠️ Error verificando estado: " . $e->getMessage());
     }
 }
+
 
 ?>
 
@@ -220,7 +281,6 @@ if ($mac_norm !== '') {
         input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
         button { width: 100%; padding: 16px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-size: 1.1rem; font-weight: 600; cursor: pointer; margin-top: 15px; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); }
         button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
-        button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
         .error { background: #ffebee; color: #c62828; padding: 12px; border-radius: 10px; margin: 15px 0; text-align: center; font-size: 0.9rem; border-left: 4px solid #c62828; }
         .mac-display { background: #f8f9fa; padding: 15px; border-radius: 12px; margin: 15px 0; font-size: 0.95rem; color: #2c3e50; text-align: center; word-wrap: break-word; border: 2px solid #e9ecef; }
         .info-display { background: #e3f2fd; padding: 12px; border-radius: 10px; margin: 10px 0; font-size: 0.9rem; color: #1565c0; text-align: center; border-left: 4px solid #2196f3; }
@@ -241,7 +301,7 @@ if ($mac_norm !== '') {
     <img src="gonetlogo.png" alt="GoNet Logo" class="top-image">
 
     <div class="form-container">
-        <h2>🌐 Registro para Wi-Fi</h2>
+        <h2> Registro para Wi-Fi</h2>
 
         <?php if ($mac_norm === ''): ?>
             <div class="error">
@@ -304,6 +364,10 @@ if ($mac_norm !== '') {
 
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
+
+          
+
+           
 
             <button type="submit" id="submitBtn">
                 <?php echo $mac_status === 'registered' ? '✅ Conectar Ahora' : '🚀 Registrar y Conectar'; ?>
