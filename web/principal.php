@@ -45,6 +45,33 @@ function redirect_to_bienvenido($mac_norm, $ip) {
     }
 }
 
+/** ✅ NUEVO: redirigir a TYC */
+function redirect_to_tyc($mac_norm, $ip) {
+    error_log("🎯 REDIRIGIENDO A TYC.PHP CON MAC: $mac_norm, IP: $ip");
+
+    $_SESSION['registration_mac'] = $mac_norm;
+    $_SESSION['registration_ip']  = $ip;
+
+    $tyc_url = 'tyc.php';
+
+    if (!headers_sent()) {
+        header("Location: " . $tyc_url);
+        exit;
+    } else {
+        echo '<!DOCTYPE html>
+        <html>
+        <head>
+            <meta http-equiv="refresh" content="0;url=' . htmlspecialchars($tyc_url) . '">
+        </head>
+        <body>
+            <p>Redireccionando... <a href="' . htmlspecialchars($tyc_url) . '">Click aquí</a></p>
+            <script>window.location.href = "' . htmlspecialchars($tyc_url) . '";</script>
+        </body>
+        </html>';
+        exit;
+    }
+}
+
 /**
  * Lanza el CoA en background (&) para no bloquear la respuesta al usuario.
  */
@@ -105,11 +132,9 @@ function validarEmailReal(string $email): bool {
     $dom = substr(strrchr($email, "@"), 1);
     if (!$dom) return false;
 
-    // checkdnsrr puede no estar disponible en todos los contenedores; probamos MX y luego A
     $mxOk = function_exists('checkdnsrr') ? checkdnsrr($dom, 'MX') : false;
     $aOk  = function_exists('checkdnsrr') ? checkdnsrr($dom, 'A')  : false;
 
-    // Si no se puede chequear DNS, al menos pasa formato; si se puede, requiere MX o A
     return (function_exists('checkdnsrr')) ? ($mxOk || $aOk) : true;
 }
 
@@ -190,7 +215,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors['terminos'] = 'Debes aceptar los términos y condiciones.';
     }
     if ($mac_norm === '') {
-        // Error general, pero lo mostramos arriba también si quieres
         error_log("❌ MAC address vacía o inválida");
     }
 
@@ -214,9 +238,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $check_radcheck->close();
                 $conn->commit();
 
-                error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, lanzando CoA en background...");
-                start_coa_async($mac_norm, $ap_ip);
-                redirect_to_bienvenido($mac_norm, $ip);
+                // ✅ CAMBIO: si ya estaba, manda a TYC y NO mostramos formulario
+                redirect_to_tyc($mac_norm, $ip);
             }
             $check_radcheck->close();
 
@@ -245,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conn->commit();
             error_log("✅ TRANSACCIÓN BD COMPLETADA");
 
-            // 4) CoA + redirección
+            // 4) CoA + redirección final si recién se registró
             start_coa_async($mac_norm, $ap_ip);
             redirect_to_bienvenido($mac_norm, $ip);
 
@@ -257,9 +280,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($conn->errno == 1062) {
-                // Duplicado
-                start_coa_async($mac_norm, $ap_ip);
-                redirect_to_bienvenido($mac_norm, $ip);
+                // Duplicado => ya estaba: manda a TYC
+                redirect_to_tyc($mac_norm, $ip);
             } else {
                 die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
             }
@@ -274,7 +296,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-/** ============= Estado de la MAC para la UI ============= */
+/** ============= Estado de la MAC para la UI / y redirección temprana ============= */
 
 $mac_status    = 'new';
 $client_exists = false;
@@ -305,6 +327,11 @@ if ($mac_norm !== '') {
 
     } catch (Exception $e) {
         error_log("⚠️ Error verificando estado: " . $e->getMessage());
+    }
+
+    /** ✅ CAMBIO: si ya está registrada, redirige de una a TYC y no muestras el form */
+    if ($mac_status === 'registered') {
+        redirect_to_tyc($mac_norm, $ip);
     }
 }
 
@@ -356,9 +383,10 @@ if ($mac_norm !== '') {
                 <small>Conéctate a la red Wi-Fi y accede desde el portal cautivo.</small>
             </div>
         <?php elseif ($mac_status === 'registered'): ?>
+            <!-- No se muestra nada: ya redirigimos a TYC arriba -->
             <div class="status-info">
                 ✅ Este dispositivo ya está registrado.<br>
-                <strong>Serás conectado inmediatamente.</strong>
+                <strong>Redirigiendo a Términos y Condiciones...</strong>
             </div>
         <?php elseif ($client_exists && $mac_status === 'new'): ?>
             <div class="warning-info">
@@ -371,7 +399,7 @@ if ($mac_norm !== '') {
             </div>
         <?php endif; ?>
 
-        <?php if ($mac_norm !== ''): ?>
+        <?php if ($mac_norm !== '' && $mac_status !== 'registered'): ?>
         <form method="POST" autocomplete="on" id="registrationForm" novalidate>
             <div class="form-group">
                 <label class="required">Nombre</label>
@@ -438,9 +466,7 @@ if ($mac_norm !== '') {
             <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
             <!-- <input type="hidden" name="ap_ip" value="<?php echo htmlspecialchars($ap_ip); ?>"> -->
 
-            <button type="submit" id="submitBtn">
-                <?php echo $mac_status === 'registered' ? '✅ Conectar Ahora' : '🚀 Registrar y Conectar'; ?>
-            </button>
+            <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
         </form>
         <?php endif; ?>
     </div>
@@ -448,7 +474,7 @@ if ($mac_norm !== '') {
     <img src="banner.png" alt="Banner" class="bottom-image">
 
     <script>
-        // ✅ Validación rápida en cliente con mensajes bajo cada input
+        // Validación rápida en cliente con mensajes bajo cada input
         const form = document.getElementById('registrationForm');
         const fields = {
             nombre:   { el: null, err: null },
@@ -499,30 +525,26 @@ if ($mac_norm !== '') {
             }
 
             function validarEmailBasico(mail) {
-                // Cliente: solo formato; el servidor hace DNS.
                 return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail);
             }
 
             function validateAll() {
                 let hasErrors = false;
-                // Nombre
                 hasErrors = setError('nombre',   fields.nombre.el.value.trim() ? '' : 'Ingresa tu nombre.') || hasErrors;
-                // Apellido
                 hasErrors = setError('apellido', fields.apellido.el.value.trim() ? '' : 'Ingresa tu apellido.') || hasErrors;
-                // Cédula
+
                 const ced = fields.cedula.el.value.replace(/\D+/g,'');
                 hasErrors = setError('cedula', validarCedulaEC(ced) ? '' : 'Cédula inválida. Verifica los 10 dígitos y el dígito verificador.') || hasErrors;
-                // Teléfono
+
                 const tel = fields.telefono.el.value.replace(/\D+/g,'');
                 hasErrors = setError('telefono', validarTelefonoEC(tel) ? '' : 'El teléfono debe empezar con 09 y tener 10 dígitos (ej. 09XXXXXXXX).') || hasErrors;
-                // Email
+
                 hasErrors = setError('email', validarEmailBasico(fields.email.el.value.trim()) ? '' : 'Correo inválido. Verifica el formato.') || hasErrors;
-                // Términos
+
                 hasErrors = setError('terminos', fields.terminos.el.checked ? '' : 'Debes aceptar los términos y condiciones.') || hasErrors;
                 return !hasErrors;
             }
 
-            // Validación en tiempo real
             ['input','blur','change'].forEach(evt => {
                 form.addEventListener(evt, (e) => {
                     if (!(e.target && e.target.name)) return;
