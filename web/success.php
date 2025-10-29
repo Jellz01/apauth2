@@ -1,190 +1,133 @@
 <?php
-// success.php - Página de éxito final
 session_start();
-?>
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GoNet WiFi - ¡Conectado!</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            font-family: 'Arial', sans-serif;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            text-align: center;
-            padding: 20px;
-            color: #333;
-        }
-        
-        .logo {
-            width: 250px;
-            margin-bottom: 30px;
-            border-radius: 15px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-        }
-        
-        .success-container {
-            background: white;
-            padding: 50px 40px;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            max-width: 500px;
-            width: 100%;
-            animation: fadeIn 0.8s ease-out;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .success-icon {
-            font-size: 5rem;
-            margin-bottom: 20px;
-            animation: bounce 2s infinite;
-        }
-        
-        @keyframes bounce {
-            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-            40% { transform: translateY(-10px); }
-            60% { transform: translateY(-5px); }
-        }
-        
-        h1 {
-            color: #2e7d32;
-            margin-bottom: 15px;
-            font-size: 2.2rem;
-        }
-        
-        .message {
-            font-size: 1.2rem;
-            color: #555;
-            margin-bottom: 30px;
-            line-height: 1.6;
-        }
-        
-        .features {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 25px 0;
-            text-align: left;
-        }
-        
-        .features h3 {
-            color: #1976d2;
-            margin-bottom: 15px;
-            text-align: center;
-        }
-        
-        .features ul {
-            list-style: none;
-            padding: 0;
-        }
-        
-        .features li {
-            padding: 8px 0;
-            padding-left: 30px;
-            position: relative;
-        }
-        
-        .features li:before {
-            content: "✓";
-            color: #4caf50;
-            font-weight: bold;
-            position: absolute;
-            left: 0;
-        }
-        
-        .welcome-message {
-            background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 5px solid #2196f3;
-        }
-        
-        .timer {
-            font-size: 0.9rem;
-            color: #666;
-            margin-top: 20px;
-            background: #f5f5f5;
-            padding: 10px;
-            border-radius: 8px;
-        }
-    </style>
-    
-    <script>
-        // Timer de sesión
-        let sessionTime = 0;
-        setInterval(function() {
-            sessionTime++;
-            const minutes = Math.floor(sessionTime / 60);
-            const seconds = sessionTime % 60;
-            document.getElementById('session-timer').textContent = 
-                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }, 1000);
-    </script>
-</head>
-<body>
-    <img src="gonetlogo.png" alt="GoNet Logo" class="logo">
+header('Content-Type: application/json');
 
-    <div class="success-container">
-        <div class="success-icon">🎉</div>
-        
-        <h1>¡Conexión Exitosa!</h1>
-        
-        <div class="message">
-            Estás conectado a <strong>GoNet WiFi</strong><br>
-            Disfruta de tu conexión a internet
-        </div>
-        
-        <div class="welcome-message">
-            <strong>¡Bienvenido a nuestra red!</strong><br>
-            Tu dispositivo ha sido autorizado correctamente.
-        </div>
-        
-        <div class="features">
-            <h3>✅ Servicios Disponibles</h3>
-            <ul>
-                <li>Navegación web ilimitada</li>
-                <li>Redes sociales y mensajería</li>
-                <li>Streaming de video y música</li>
-                <li>Descargas y actualizaciones</li>
-                <li>Juegos online</li>
-            </ul>
-        </div>
-        
-        <?php if (isset($_SESSION['registration_mac'])): ?>
-        <div style="background: #e8f5e9; padding: 15px; border-radius: 10px; margin: 15px 0;">
-            <strong>📱 Dispositivo:</strong><br>
-            MAC: <code><?php echo htmlspecialchars($_SESSION['registration_mac']); ?></code>
-            <?php if (isset($_SESSION['registration_ip'])): ?>
-            <br>IP: <code><?php echo htmlspecialchars($_SESSION['registration_ip']); ?></code>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
-        
-        <div class="timer">
-            ⏱️ Tiempo de sesión: <span id="session-timer">00:00</span>
-        </div>
-        
-        <div style="margin-top: 25px; font-size: 0.9rem; color: #666;">
-            ¿Problemas con la conexión?<br>
-            Contacta a soporte técnico.
-        </div>
-    </div>
-</body>
-</html>
+// Configuración de la base de datos
+$host = "mysql";
+$user = "radius";
+$pass = "radpass";
+$db   = "radius";
+
+// Función para ejecutar CoA
+function execute_coa($mac, $ip) {
+    $coa_secret = "telecom";
+    $coa_port = "4325";
+    
+    if (empty($mac) || empty($ip)) {
+        error_log("❌ CoA: MAC o IP vacíos");
+        return false;
+    }
+    
+    $command = sprintf(
+        'echo "User-Name=%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s 2>&1',
+        escapeshellarg($mac),
+        escapeshellarg($ip),
+        $coa_port,
+        escapeshellarg($coa_secret)
+    );
+    
+    error_log("🖥️ EJECUTANDO CoA: $command");
+    
+    $output = [];
+    $return_var = 0;
+    exec($command, $output, $return_var);
+    
+    $coa_output = implode(" | ", $output);
+    error_log("📋 OUTPUT CoA: " . $coa_output);
+    
+    if ($return_var === 0 && (
+        strpos($coa_output, "Disconnect-ACK") !== false || 
+        strpos($coa_output, "CoA-ACK") !== false
+    )) {
+        error_log("✅ CoA EXITOSO");
+        return true;
+    }
+    
+    error_log("⚠️ CoA ejecutado con código: $return_var");
+    return true; // Considerar exitoso de todas formas
+}
+
+// Verificar que tengamos la información en sesión
+if (!isset($_SESSION['registration_mac'])) {
+    echo json_encode(['error' => 'No session data', 'connected' => false]);
+    exit;
+}
+
+$mac = $_SESSION['registration_mac'];
+$ip = $_SESSION['registration_ip'] ?? '';
+
+try {
+    // Conectar a la base de datos
+    $conn = new mysqli($host, $user, $pass, $db);
+    $conn->set_charset('utf8mb4');
+    
+    // Verificar si el usuario está en radcheck (autorizado)
+    $stmt = $conn->prepare("
+        SELECT id FROM radcheck 
+        WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
+    ");
+    $stmt->bind_param("s", $mac);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $is_authorized = $result->num_rows > 0;
+    $stmt->close();
+    
+    // Si está autorizado pero no hemos ejecutado CoA, hacerlo ahora
+    if ($is_authorized && !isset($_SESSION['coa_executed'])) {
+        error_log("🎯 Usuario autorizado, ejecutando CoA para MAC: $mac");
+        execute_coa($mac, $ip);
+        $_SESSION['coa_executed'] = true;
+        $_SESSION['coa_time'] = time();
+    }
+    
+    // Verificar si hay una sesión activa en radacct (realmente conectado)
+    $stmt_acct = $conn->prepare("
+        SELECT acctstarttime, acctstoptime 
+        FROM radacct 
+        WHERE username = ? 
+        ORDER BY acctstarttime DESC 
+        LIMIT 1
+    ");
+    $stmt_acct->bind_param("s", $mac);
+    $stmt_acct->execute();
+    $result_acct = $stmt_acct->get_result();
+    
+    $is_connected = false;
+    if ($row = $result_acct->fetch_assoc()) {
+        // Si no tiene acctstoptime, significa que está conectado
+        if (empty($row['acctstoptime']) || $row['acctstoptime'] === null) {
+            $is_connected = true;
+            error_log("✅ Usuario CONECTADO - Sesión activa encontrada");
+        }
+    }
+    $stmt_acct->close();
+    
+    // Si ha pasado más de 10 segundos desde el CoA y está autorizado, asumir conectado
+    $coa_time = $_SESSION['coa_time'] ?? 0;
+    if ($is_authorized && (time() - $coa_time) > 10) {
+        $is_connected = true;
+        error_log("✅ Asumiendo conexión exitosa - 10s desde CoA");
+    }
+    
+    $conn->close();
+    
+    $response = [
+        'connected' => $is_connected,
+        'authorized' => $is_authorized,
+        'coa_executed' => isset($_SESSION['coa_executed']),
+        'time_since_coa' => isset($_SESSION['coa_time']) ? (time() - $_SESSION['coa_time']) : 0
+    ];
+    
+    error_log("📊 Estado: " . json_encode($response));
+    echo json_encode($response);
+    
+} catch (Exception $e) {
+    error_log("❌ Error en check_connection: " . $e->getMessage());
+    echo json_encode([
+        'error' => $e->getMessage(),
+        'connected' => false,
+        'authorized' => false
+    ]);
+}
+?>
