@@ -45,6 +45,34 @@ function redirect_to_bienvenido($mac_norm, $ip) {
     }
 }
 
+/** ➕ NUEVO: redirigir a la pantalla “solo T&C” */
+function redirect_to_tc($mac_norm, $ip) {
+    error_log("🎯 REDIRIGIENDO A terminosYcondiciones.php CON MAC: $mac_norm, IP: $ip");
+
+    $_SESSION['registration_mac'] = $mac_norm;
+    $_SESSION['registration_ip']  = $ip;
+    $_SESSION['coa_executed']     = false;
+
+    $tc_url = 'terminosYcondiciones.php';
+
+    if (!headers_sent()) {
+        header("Location: " . $tc_url);
+        exit;
+    } else {
+        echo '<!DOCTYPE html>
+        <html>
+        <head>
+            <meta http-equiv="refresh" content="0;url=' . htmlspecialchars($tc_url) . '">
+        </head>
+        <body>
+            <p>Redireccionando... <a href="' . htmlspecialchars($tc_url) . '">Click aquí</a></p>
+            <script>window.location.href = "' . htmlspecialchars($tc_url) . '";</script>
+        </body>
+        </html>';
+        exit;
+    }
+}
+
 /**
  * Valida cédula ecuatoriana (10 dígitos, provincia 01–24, dígito verificador).
  */
@@ -75,21 +103,15 @@ function validar_cedula_ec($cedula) {
  */
 function validar_nombre_real($texto) {
     $texto = trim($texto);
-    // Solo letras con tildes, ñ y espacios/apóstrofos/guiones moderados
     if (!preg_match("/^[A-Za-zÁÉÍÓÚáéíóúÑñÜü' -]{2,}$/u", $texto)) return false;
-    // Al menos 2 letras (no solo símbolos/espacios)
     if (!preg_match("/[A-Za-zÁÉÍÓÚáéíóúÑñÜü].*[A-Za-zÁÉÍÓÚáéíóúÑñÜü]/u", $texto)) return false;
-    // Al menos una vocal para evitar strings como "qwrtt" o "zzzz"
     if (!preg_match("/[AEIOUaeiouÁÉÍÓÚáéíóúÜü]/u", $texto)) return false;
-    // Evitar más de 3 caracteres iguales consecutivos (ej: "aaaaaa")
     if (preg_match("/(.)\\1{3,}/u", $texto)) return false;
     return true;
 }
 
 /**
  * Lanza el CoA en background (&) para no bloquear la respuesta al usuario.
- * Usa /tmp/coa_async.log para logging de radclient.
- * Pasa preferentemente la IP del AP/Controlador en $ap_ip (no la IP del cliente).
  */
 function start_coa_async($mac, $ap_ip) {
     if (empty($mac) || empty($ap_ip)) {
@@ -98,7 +120,7 @@ function start_coa_async($mac, $ap_ip) {
     }
 
     $coa_secret = "telecom";
-    $coa_port   = "4325"; // Mantengo tu puerto actual
+    $coa_port   = "4325"; // Si Aruba usa 3799, unifica aquí y en el NAS
 
     $payload = sprintf('User-Name=%s', addslashes($mac));
     $cmd = sprintf(
@@ -144,6 +166,31 @@ $ip       = trim($ip_raw);
 
 error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP Cliente: '$ip', AP_IP: '$ap_ip'");
 
+/** ============= ⚡️ NUEVO: Early redirect a T&C si ya existe ============= */
+
+if ($mac_norm !== '') {
+    try {
+        $stmt = $conn->prepare("
+            SELECT id FROM radcheck 
+            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
+            LIMIT 1
+        ");
+        $stmt->bind_param("s", $mac_norm);
+        $stmt->execute();
+        $stmt->store_result();
+
+        if ($stmt->num_rows > 0) {
+            // Ya existe en radcheck → solo T&C
+            $stmt->close();
+            redirect_to_tc($mac_norm, $ip);
+        }
+        $stmt->close();
+    } catch (Exception $e) {
+        error_log("⚠️ Error comprobando radcheck (early): ".$e->getMessage());
+        // si falla, seguimos con el flujo normal (form)
+    }
+}
+
 /** ============= Manejo POST (Registro/Conexión) ============= */
 
 $errors = [
@@ -173,6 +220,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ip         = trim($ip_post);
     $ap_ip      = trim($ap_ip_post) !== '' ? trim($ap_ip_post) : $ap_ip;
 
+    /** 🔁 Seguridad: si en POST ya existe, manda a T&C */
+    try {
+        $stmt = $conn->prepare("
+            SELECT id FROM radcheck 
+            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
+            LIMIT 1
+        ");
+        $stmt->bind_param("s", $mac_norm);
+        $stmt->execute();
+        $stmt->store_result();
+        if ($stmt->num_rows > 0) {
+            $stmt->close();
+            redirect_to_tc($mac_norm, $ip);
+        }
+        $stmt->close();
+    } catch (Exception $e) {
+        error_log("⚠️ Error comprobando radcheck en POST: ".$e->getMessage());
+    }
+
     // ====== VALIDACIONES SERVIDOR ======
     if (!validar_nombre_real($nombre)) {
         $errors['nombre'] = 'Ingresa un nombre válido (solo letras, mínimo 2 y con al menos una vocal).';
@@ -193,7 +259,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors['terminos'] = 'Debes aceptar los términos y condiciones para registrarte.';
     }
     if ($mac_norm === '') {
-        // Error crítico, pero lo dejamos como mensaje general
         $errors['nombre'] = $errors['nombre'] ?: 'No se detectó una MAC válida desde el portal.';
     }
 
@@ -204,7 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conn->begin_transaction();
             error_log("🔄 INICIANDO TRANSACCIÓN BD");
 
-            // 1) Verificar si ya existe en radcheck
+            // 1) (opcional) doble-check antes de insertar
             $check_radcheck = $conn->prepare("
                 SELECT id FROM radcheck 
                 WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
@@ -216,10 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($check_radcheck->num_rows > 0) {
                 $check_radcheck->close();
                 $conn->commit();
-
-                error_log("ℹ️ MAC $mac_norm YA EXISTE en radcheck, lanzando CoA en background...");
-                start_coa_async($mac_norm, $ap_ip);
-                redirect_to_bienvenido($mac_norm, $ip);
+                redirect_to_tc($mac_norm, $ip);
             }
             $check_radcheck->close();
 
@@ -248,13 +310,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conn->commit();
             error_log("✅ TRANSACCIÓN BD COMPLETADA");
 
-            // 4) Lanzar CoA en background (no bloquea UX)
-            error_log("🎉 REGISTRO COMPLETADO, lanzando CoA en background...");
-            start_coa_async($mac_norm, $ap_ip);
-
-            // 5) Redirigir de inmediato
-            error_log("🔄 REDIRIGIENDO A BIENVENIDO.PHP");
-            redirect_to_bienvenido($mac_norm, $ip);
+            // 4) Redirigir a T&C de todos modos (primera vez ya registrados deben aceptar T&C)
+            redirect_to_tc($mac_norm, $ip);
 
         } catch (Exception $e) {
             error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
@@ -267,10 +324,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($conn->errno == 1062) {
-                // Duplicado: ya existe. Lanza CoA en background y redirige
-                error_log("⚠️ MAC $mac_norm YA EXISTE (1062), lanzando CoA en background...");
-                start_coa_async($mac_norm, $ap_ip);
-                redirect_to_bienvenido($mac_norm, $ip);
+                // Duplicado: ya existe → T&C
+                redirect_to_tc($mac_norm, $ip);
             } else {
                 die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
             }
@@ -278,7 +333,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-/** ============= Estado de la MAC para la UI ============= */
+/** ============= Estado de la MAC para la UI (solo informativo) ============= */
 
 $mac_status    = 'new';
 $client_exists = false;
@@ -312,7 +367,7 @@ if ($mac_norm !== '') {
     }
 }
 
-// Helper para repoblar valores y marcar errores en inputs
+// Helpers UI
 function v($key){ return htmlspecialchars($_POST[$key] ?? '', ENT_QUOTES, 'UTF-8'); }
 function err($key,$errors){ return $errors[$key] ?? ''; }
 function has_err($key,$errors){ return !empty($errors[$key]); }
@@ -337,7 +392,6 @@ function has_err($key,$errors){ return !empty($errors[$key]); }
         button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-size: 1.05rem; font-weight: 600; cursor: pointer; margin-top: 10px; transition: all 0.2s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); }
         button:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
         .error { background: #ffebee; color: #c62828; padding: 12px; border-radius: 10px; margin: 15px 0; text-align: center; font-size: 0.9rem; border-left: 4px solid #c62828; }
-        .mac-display { background: #f8f9fa; padding: 15px; border-radius: 12px; margin: 15px 0; font-size: 0.95rem; color: #2c3e50; text-align: center; word-wrap: break-word; border: 2px solid #e9ecef; }
         .info-display { background: #e3f2fd; padding: 12px; border-radius: 10px; margin: 10px 0; font-size: 0.9rem; color: #1565c0; text-align: center; border-left: 4px solid #2196f3; }
         .status-info { background: #e8f5e8; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 0.95rem; color: #2e7d32; text-align: center; border-left: 4px solid #4caf50; font-weight: 500; }
         .warning-info { background: #fff3e0; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 0.95rem; color: #ef6c00; text-align: center; border-left: 4px solid #ff9800; }
@@ -348,11 +402,8 @@ function has_err($key,$errors){ return !empty($errors[$key]); }
         .terminos-text { font-size: 0.9rem; color: #555; line-height: 1.4; }
         .terminos-link { color: #667eea; text-decoration: none; font-weight: 500; }
         .terminos-link:hover { text-decoration: underline; }
-
-        /* 👇 Estilos de errores por campo */
         .field-error { color: #c62828; font-size: 0.85rem; margin-top: 6px; }
         .input-error { border-color: #e53935 !important; box-shadow: 0 0 0 3px rgba(229,57,53,0.1) !important; }
-
         @media (max-width: 480px) {
             .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; }
             input, button { font-size: 1rem; }
@@ -372,16 +423,6 @@ function has_err($key,$errors){ return !empty($errors[$key]); }
             <div class="error">
                 ❌ No se detectó ninguna dirección MAC.<br>
                 <small>Conéctate a la red Wi-Fi y accede desde el portal cautivo.</small>
-            </div>
-        <?php elseif ($mac_status === 'registered'): ?>
-            <div class="status-info">
-                ✅ Este dispositivo ya está registrado.<br>
-                <strong>Serás conectado inmediatamente.</strong>
-            </div>
-        <?php elseif ($client_exists && $mac_status === 'new'): ?>
-            <div class="warning-info">
-                ⚠️ Dispositivo registrado pero necesita configuración.<br>
-                <strong>Completa el registro para conectar.</strong>
             </div>
         <?php else: ?>
             <div class="info-display">
@@ -455,7 +496,7 @@ function has_err($key,$errors){ return !empty($errors[$key]); }
                     <input type="checkbox" name="terminos" id="terminos" <?php echo isset($_POST['terminos'])?'checked':''; ?>>
                     <label for="terminos" class="terminos-text">
                         Acepto los <a href="terminos.html" target="_blank" class="terminos-link">Términos y Condiciones</a> 
-                        y la <a href="privacidad.html" target="_blank" class="terminos-link">Política de Privacidad</a> 
+                        y la <a href="privacidad.html" target_blank" class="terminos-link">Política de Privacidad</a> 
                         de GoNet Wi-Fi.
                     </label>
                 </div>
@@ -468,9 +509,7 @@ function has_err($key,$errors){ return !empty($errors[$key]); }
             <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
             <!-- <input type="hidden" name="ap_ip" value="<?php echo htmlspecialchars($ap_ip); ?>"> -->
 
-            <button type="submit" id="submitBtn">
-                <?php echo $mac_status === 'registered' ? '✅ Conectar Ahora' : '🚀 Registrar y Conectar'; ?>
-            </button>
+            <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
         </form>
         <?php endif; ?>
     </div>
@@ -562,7 +601,6 @@ function has_err($key,$errors){ return !empty($errors[$key]); }
             if(!isValidTel(telefono.value.trim())) { setErr(telefono,'Teléfono inválido. Debe tener 10 dígitos y comenzar con 09.'); ok=false; }
             if(!isValidEmail(email.value.trim())) { setErr(email,'Email inválido. Revisa el formato.'); ok=false; }
             if(!terminos.checked){
-                // mostrar error bajo el checkbox
                 let err = terminos.closest('.terminos-container').querySelector('.field-error');
                 if(!err){
                     err = document.createElement('div');
