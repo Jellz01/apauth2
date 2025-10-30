@@ -45,7 +45,7 @@ function redirect_to_bienvenido($mac_norm, $ip) {
     }
 }
 
-/** ✅ NUEVO: redirigir a TYC */
+/** ✅ redirigir a TYC si ya está */
 function redirect_to_tyc($mac_norm, $ip) {
     error_log("🎯 REDIRIGIENDO A TYC.PHP CON MAC: $mac_norm, IP: $ip");
 
@@ -72,9 +72,7 @@ function redirect_to_tyc($mac_norm, $ip) {
     }
 }
 
-/**
- * Lanza el CoA en background (&) para no bloquear la respuesta al usuario.
- */
+/** CoA en background */
 function start_coa_async($mac, $ap_ip) {
     if (empty($mac) || empty($ap_ip)) {
         error_log("❌ start_coa_async: mac o ap_ip vacíos");
@@ -94,12 +92,12 @@ function start_coa_async($mac, $ap_ip) {
     );
 
     error_log("🚀 Lanzando CoA en background: $cmd");
-    exec($cmd); // no bloquea
+    exec($cmd);
     return true;
 }
 
-/** ===================== Validaciones de Campos (Servidor) ===================== */
-/** ✅ Cédula ecuatoriana: 10 dígitos, provincia 01-24, tercer dígito < 6, y dígito verificador */
+/** ===================== Validaciones ===================== */
+
 function validarCedulaEC(string $cedula): bool {
     if (!preg_match('/^\d{10}$/', $cedula)) return false;
 
@@ -120,13 +118,11 @@ function validarCedulaEC(string $cedula): bool {
     return $dv === (int)$cedula[9];
 }
 
-/** ✅ Teléfono: debe empezar en 09 y tener 10 dígitos */
 function validarTelefonoEC(string $tel): bool {
     $tel = preg_replace('/\D+/', '', $tel);
     return preg_match('/^09\d{8}$/', $tel) === 1;
 }
 
-/** ✅ Email: formato y dominio existente (MX o A) */
 function validarEmailReal(string $email): bool {
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
     $dom = substr(strrchr($email, "@"), 1);
@@ -166,7 +162,6 @@ $mac_norm = normalize_mac($mac_raw);
 $ap_norm  = normalize_mac($ap_raw);
 $ip       = trim($ip_raw);
 
-/** Para mensajes de error por campo (servidor) */
 $errors = [
     'nombre'   => '',
     'apellido' => '',
@@ -176,9 +171,89 @@ $errors = [
     'terminos' => ''
 ];
 
-error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP Cliente: '$ip', AP_IP: '$ap_ip'");
+error_log("🔍 PARÁMETROS - MAC: '$mac_norm', IP Cliente: '$ip', AP_IP: '$ap_ip', AP_MAC: '$ap_norm'");
 
-/** ============= Manejo POST (Registro/Conexión) ============= */
+/** =======================================================
+ *  🔎 RESOLVER ZONA / PUBLICIDAD SEGÚN AP O CLIENTE
+ *  ======================================================= */
+
+$zona_codigo = '';
+$zona_nombre = '';
+$zona_banner = '';
+
+// 1) Si llegó la MAC del AP, buscamos directo en wifi_zona_aps
+if ($ap_norm !== '') {
+    try {
+        $stmtZ = $conn->prepare("
+            SELECT z.codigo, z.nombre, z.banner_url
+            FROM wifi_zona_aps a
+            JOIN wifi_zonas z ON a.zona_codigo = z.codigo
+            WHERE a.ap_mac = ?
+            LIMIT 1
+        ");
+        $stmtZ->bind_param("s", $ap_norm);
+        $stmtZ->execute();
+        $resZ = $stmtZ->get_result();
+        if ($rowZ = $resZ->fetch_assoc()) {
+            $zona_codigo = $rowZ['codigo'];
+            $zona_nombre = $rowZ['nombre'];
+            $zona_banner = $rowZ['banner_url'];
+            error_log("✅ Zona detectada por AP_MAC: $ap_norm → {$zona_codigo}");
+        }
+        $stmtZ->close();
+    } catch (Exception $e) {
+        error_log("⚠️ Error buscando zona por AP: " . $e->getMessage());
+    }
+}
+
+// 2) Si NO vino AP pero sí la MAC del cliente, tratamos de deducir la zona
+if ($zona_codigo === '' && $mac_norm !== '') {
+    try {
+        // buscamos el último ap_mac que registró ese cliente
+        $stmtC = $conn->prepare("
+            SELECT c.ap_mac
+            FROM clients c
+            WHERE c.mac = ?
+            ORDER BY c.id DESC
+            LIMIT 1
+        ");
+        $stmtC->bind_param("s", $mac_norm);
+        $stmtC->execute();
+        $resC = $stmtC->get_result();
+        if ($rowC = $resC->fetch_assoc()) {
+            $ap_from_client = normalize_mac($rowC['ap_mac']);
+            if ($ap_from_client !== '') {
+                $stmtZ2 = $conn->prepare("
+                    SELECT z.codigo, z.nombre, z.banner_url
+                    FROM wifi_zona_aps a
+                    JOIN wifi_zonas z ON a.zona_codigo = z.codigo
+                    WHERE a.ap_mac = ?
+                    LIMIT 1
+                ");
+                $stmtZ2->bind_param("s", $ap_from_client);
+                $stmtZ2->execute();
+                $resZ2 = $stmtZ2->get_result();
+                if ($rowZ2 = $resZ2->fetch_assoc()) {
+                    $zona_codigo = $rowZ2['codigo'];
+                    $zona_nombre = $rowZ2['nombre'];
+                    $zona_banner = $rowZ2['banner_url'];
+                    error_log("✅ Zona detectada por MAC de cliente: $mac_norm → {$zona_codigo}");
+                }
+                $stmtZ2->close();
+            }
+        }
+        $stmtC->close();
+    } catch (Exception $e) {
+        error_log("⚠️ Error deduciendo zona por cliente: " . $e->getMessage());
+    }
+}
+
+// 3) Guardamos en sesión para que otros scripts la usen
+$_SESSION['wifi_zona_codigo'] = $zona_codigo;
+$_SESSION['wifi_zona_nombre'] = $zona_nombre;
+$_SESSION['wifi_zona_banner'] = $zona_banner;
+
+/** ============= Manejo POST ============= */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     error_log("📨 PROCESANDO FORMULARIO POST");
@@ -190,18 +265,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim($_POST['email']    ?? '');
     $terminos = isset($_POST['terminos']) ? 1 : 0;
 
-    $mac_post   = $_POST['mac']    ?? '';
-    $ip_post    = $_POST['ip']     ?? '';
-    $ap_ip_post = $_POST['ap_ip']  ?? $ap_ip;
+    $mac_post    = $_POST['mac']    ?? '';
+    $ip_post     = $_POST['ip']     ?? '';
+    $ap_post_raw = $_POST['ap_mac'] ?? $ap_raw;
+    $ap_ip_post  = $_POST['ap_ip']  ?? $ap_ip;
 
     $mac_norm   = normalize_mac($mac_post);
+    $ap_norm    = normalize_mac($ap_post_raw);
     $ip         = trim($ip_post);
     $ap_ip      = trim($ap_ip_post) !== '' ? trim($ap_ip_post) : $ap_ip;
 
-    // ✅ Validaciones servidor
+    // Validaciones
     if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
     if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
-
     if (!validarCedulaEC($cedula)) {
         $errors['cedula'] = 'Cédula inválida. Verifica los 10 dígitos y el dígito verificador.';
     }
@@ -215,7 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors['terminos'] = 'Debes aceptar los términos y condiciones.';
     }
     if ($mac_norm === '') {
-        error_log("❌ MAC address vacía o inválida");
+        error_log("❌ MAC address vacía o inválida en POST");
     }
 
     $hayErrores = array_filter($errors, fn($e) => $e !== '');
@@ -237,38 +313,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($check_radcheck->num_rows > 0) {
                 $check_radcheck->close();
                 $conn->commit();
-
-                // ✅ CAMBIO: si ya estaba, manda a TYC y NO mostramos formulario
+                // ya estaba, pero igual mantenemos la zona en sesión
+                $_SESSION['wifi_zona_codigo'] = $zona_codigo;
+                $_SESSION['wifi_zona_nombre'] = $zona_nombre;
+                $_SESSION['wifi_zona_banner'] = $zona_banner;
                 redirect_to_tyc($mac_norm, $ip);
             }
             $check_radcheck->close();
 
-            // 2) Insertar en clients
+            // 2) Insertar en clients SOLO con ap_mac
             $stmt_clients = $conn->prepare("
-                INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
+                INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, ap_mac)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
             ");
-            $stmt_clients->bind_param("ssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm);
+            $stmt_clients->bind_param("sssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm, $ap_norm);
             $stmt_clients->execute();
-            $client_id = $conn->insert_id;
+            $client_id = $stmt_clients->insert_id;
             $stmt_clients->close();
             error_log("✅ CLIENTE INSERTADO con ID: $client_id");
 
-            // 3) Insertar en radcheck (auto-aceptar por MAC)
+            // 3) Insertar en radcheck
             $stmt_radcheck = $conn->prepare("
                 INSERT INTO radcheck (username, attribute, op, value)
                 VALUES (?, 'Auth-Type', ':=', 'Accept')
             ");
             $stmt_radcheck->bind_param("s", $mac_norm);
             $stmt_radcheck->execute();
-            $radcheck_id = $conn->insert_id;
             $stmt_radcheck->close();
-            error_log("✅ RADCHECK INSERTADO con ID: $radcheck_id");
+            error_log("✅ RADCHECK INSERTADO");
 
             $conn->commit();
             error_log("✅ TRANSACCIÓN BD COMPLETADA");
 
-            // 4) CoA + redirección final si recién se registró
+            // Guardar zona detectada en sesión por si bienvenido.php la quiere usar
+            $_SESSION['wifi_zona_codigo'] = $zona_codigo;
+            $_SESSION['wifi_zona_nombre'] = $zona_nombre;
+            $_SESSION['wifi_zona_banner'] = $zona_banner;
+
+            // CoA y redir
             start_coa_async($mac_norm, $ap_ip);
             redirect_to_bienvenido($mac_norm, $ip);
 
@@ -280,14 +362,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($conn->errno == 1062) {
-                // Duplicado => ya estaba: manda a TYC
+                // duplicado → ya estaba
+                $_SESSION['wifi_zona_codigo'] = $zona_codigo;
+                $_SESSION['wifi_zona_nombre'] = $zona_nombre;
+                $_SESSION['wifi_zona_banner'] = $zona_banner;
                 redirect_to_tyc($mac_norm, $ip);
             } else {
                 die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
             }
         }
     } else {
-        // Guardar valores saneados para re-rellenar el formulario
         $_POST['nombre']   = $nombre;
         $_POST['apellido'] = $apellido;
         $_POST['cedula']   = $cedula;
@@ -296,7 +380,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-/** ============= Estado de la MAC para la UI / y redirección temprana ============= */
+/** ============= Estado de la MAC para la UI / redirección temprana ============= */
 
 $mac_status    = 'new';
 $client_exists = false;
@@ -329,8 +413,12 @@ if ($mac_norm !== '') {
         error_log("⚠️ Error verificando estado: " . $e->getMessage());
     }
 
-    /** ✅ CAMBIO: si ya está registrada, redirige de una a TYC y no muestras el form */
     if ($mac_status === 'registered') {
+        // igual guardamos la zona antes de salir
+        $_SESSION['wifi_zona_codigo'] = $zona_codigo;
+        $_SESSION['wifi_zona_nombre'] = $zona_nombre;
+        $_SESSION['wifi_zona_banner'] = $zona_banner;
+
         redirect_to_tyc($mac_norm, $ip);
     }
 }
@@ -367,6 +455,7 @@ if ($mac_norm !== '') {
         .terminos-text { font-size: 0.9rem; color: #555; line-height: 1.4; }
         .terminos-link { color: #667eea; text-decoration: none; font-weight: 500; }
         .terminos-link:hover { text-decoration: underline; }
+        .zona-badge { background:#fff3cd; color:#856404; padding:6px 10px; border-radius:999px; font-size:0.75rem; display:inline-block; margin-bottom:10px; }
         @media (max-width: 480px) { .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; } input, button { font-size: 1rem; } h2 { font-size: 1.5rem; } body { padding: 15px; } }
     </style>
 </head>
@@ -377,13 +466,31 @@ if ($mac_norm !== '') {
     <div class="form-container">
         <h2> Registro para Wi-Fi</h2>
 
+        <!-- Mostrar la zona si se detectó -->
+        <?php if ($zona_codigo !== ''): ?>
+            <div class="zona-badge">
+                📍 Zona detectada: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong>
+            </div>
+        <?php endif; ?>
+
+        <!-- 👇 MOSTRAR MAC DEL DISPOSITIVO + AP -->
+        <div class="mac-display">
+            <strong>📱 MAC del dispositivo:</strong><br>
+            <?php echo $mac_norm !== '' ? $mac_norm : '— no llegó —'; ?>
+            <br><br>
+            <strong>📡 MAC del AP:</strong><br>
+            <?php echo $ap_norm !== '' ? $ap_norm : '— no llegó (envía ?ap_mac=xx:xx:xx:xx:xx:xx) —'; ?>
+            <br><br>
+            <strong>🌐 IP del AP (solo para CoA):</strong><br>
+            <?php echo $ap_ip !== '' ? $ap_ip : '—'; ?>
+        </div>
+
         <?php if ($mac_norm === ''): ?>
             <div class="error">
                 ❌ No se detectó ninguna dirección MAC.<br>
                 <small>Conéctate a la red Wi-Fi y accede desde el portal cautivo.</small>
             </div>
         <?php elseif ($mac_status === 'registered'): ?>
-            <!-- No se muestra nada: ya redirigimos a TYC arriba -->
             <div class="status-info">
                 ✅ Este dispositivo ya está registrado.<br>
                 <strong>Redirigiendo a Términos y Condiciones...</strong>
@@ -462,19 +569,25 @@ if ($mac_norm !== '') {
                 <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['terminos']); ?></div><?php endif; ?>
             </div>
 
+            <!-- 👇 Datos ocultos -->
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
-            <!-- <input type="hidden" name="ap_ip" value="<?php echo htmlspecialchars($ap_ip); ?>"> -->
+            <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
+            <input type="hidden" name="ap_ip"  value="<?php echo htmlspecialchars($ap_ip); ?>">
 
             <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
         </form>
         <?php endif; ?>
     </div>
 
-    <img src="banner.png" alt="Banner" class="bottom-image">
+    <!-- 👇 Aquí la publicidad dependiente de la zona -->
+    <?php if ($zona_banner): ?>
+        <img src="<?php echo htmlspecialchars($zona_banner); ?>" alt="Publicidad zona <?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?>" class="bottom-image">
+    <?php else: ?>
+        <img src="banner.png" alt="Banner" class="bottom-image">
+    <?php endif; ?>
 
     <script>
-        // Validación rápida en cliente con mensajes bajo cada input
         const form = document.getElementById('registrationForm');
         const fields = {
             nombre:   { el: null, err: null },
@@ -521,7 +634,7 @@ if ($mac_norm !== '') {
             }
 
             function validarTelefonoEC(tel) {
-                return /^09\d{8}$/.test(tel.replace(/\D+/g,''));
+                return /^09\d{8}$/.test(tel.replace(/\D+/g,'')); 
             }
 
             function validarEmailBasico(mail) {
@@ -534,6 +647,7 @@ if ($mac_norm !== '') {
                 hasErrors = setError('apellido', fields.apellido.el.value.trim() ? '' : 'Ingresa tu apellido.') || hasErrors;
 
                 const ced = fields.cedula.el.value.replace(/\D+/g,'');
+
                 hasErrors = setError('cedula', validarCedulaEC(ced) ? '' : 'Cédula inválida. Verifica los 10 dígitos y el dígito verificador.') || hasErrors;
 
                 const tel = fields.telefono.el.value.replace(/\D+/g,'');

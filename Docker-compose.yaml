@@ -11,7 +11,7 @@ services:
       MYSQL_USER: radius
       MYSQL_PASSWORD: radpass
     volumes:
-      - mysql_data:/var/lib/mysql
+      #- mysql_data:/var/lib/mysql
       - ./mysql/radius-lf.sql:/docker-entrypoint-initdb.d/1-radius.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pradius"]
@@ -39,7 +39,7 @@ services:
     ports:
        - "1812:1812/udp"
        - "1813:1813/udp"
-       - "4325:4325/udp"
+       - "3799:3799/udp"
 
     restart: always
     networks:
@@ -55,6 +55,7 @@ services:
       - "8080:80"
     volumes:
       - ./web:/var/www/html
+      - ./web/php-upload.ini:/usr/local/etc/php/conf.d/php-upload.ini
     environment:
       MYSQL_HOST: mysql
       MYSQL_USER: radius

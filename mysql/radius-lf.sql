@@ -1,14 +1,8 @@
--- ================================
--- Minimal FreeRADIUS Schema for MAC Authentication
--- ================================
-
 CREATE DATABASE IF NOT EXISTS radius;
 USE radius;
 
--- ================================
--- 1. YOUR CLIENTS TABLE (Main table for web interface)
--- ================================
-CREATE TABLE IF NOT EXISTS clients (
+
+CREATE TABLE clients (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nombre VARCHAR(100),
     apellido VARCHAR(100),
@@ -16,15 +10,26 @@ CREATE TABLE IF NOT EXISTS clients (
     telefono VARCHAR(20),
     email VARCHAR(100),
     mac VARCHAR(20) UNIQUE,
+    ap_mac VARCHAR(32),
     enabled TINYINT(1) DEFAULT 1
 );
 
 
--- ================================
--- 2. Standard FreeRADIUS Tables
--- ================================
+CREATE TABLE wifi_zonas (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    codigo VARCHAR(50) UNIQUE,      
+    nombre VARCHAR(100) NOT NULL,   
+    descripcion TEXT,
+    banner_url VARCHAR(255)    
+);
 
--- Table structure for table 'radacct'
+CREATE TABLE wifi_zona_aps (
+    ap_mac VARCHAR(32) PRIMARY KEY,   -- MAC NORAMLIZADO DEL AP
+    zona_codigo VARCHAR(50) NOT NULL,
+    CONSTRAINT fk_zona
+        FOREIGN KEY (zona_codigo) REFERENCES wifi_zonas(codigo)
+);
+
 CREATE TABLE radacct (
   radacctid bigint(21) NOT NULL auto_increment,
   acctsessionid varchar(64) NOT NULL default '',
@@ -72,7 +77,7 @@ CREATE TABLE radacct (
   INDEX bulk_close (acctstoptime, nasipaddress, acctstarttime)
 ) ENGINE = INNODB;
 
--- Table structure for table 'radcheck'
+
 CREATE TABLE radcheck (
   id int(11) unsigned NOT NULL auto_increment,
   username varchar(64) NOT NULL default '',
@@ -83,7 +88,7 @@ CREATE TABLE radcheck (
   KEY username (username(32))
 );
 
--- Table structure for table 'radgroupcheck'
+
 CREATE TABLE radgroupcheck (
   id int(11) unsigned NOT NULL auto_increment,
   groupname varchar(64) NOT NULL default '',
@@ -94,7 +99,7 @@ CREATE TABLE radgroupcheck (
   KEY groupname (groupname(32))
 );
 
--- Table structure for table 'radgroupreply'
+
 CREATE TABLE radgroupreply (
   id int(11) unsigned NOT NULL auto_increment,
   groupname varchar(64) NOT NULL default '',
@@ -105,7 +110,7 @@ CREATE TABLE radgroupreply (
   KEY groupname (groupname(32))
 );
 
--- Table structure for table 'radreply'
+
 CREATE TABLE radreply (
   id int(11) unsigned NOT NULL auto_increment,
   username varchar(64) NOT NULL default '',
@@ -116,7 +121,7 @@ CREATE TABLE radreply (
   KEY username (username(32))
 );
 
--- Table structure for table 'radusergroup'
+
 CREATE TABLE radusergroup (
   id int(11) unsigned NOT NULL auto_increment,
   username varchar(64) NOT NULL default '',
@@ -126,7 +131,6 @@ CREATE TABLE radusergroup (
   KEY username (username(32))
 );
 
--- Table structure for table 'radpostauth'
 CREATE TABLE radpostauth (
   id int(11) NOT NULL auto_increment,
   username varchar(64) NOT NULL default '',
@@ -136,7 +140,7 @@ CREATE TABLE radpostauth (
   PRIMARY KEY  (id)
 ) ENGINE = INNODB;
 
--- Table structure for table 'nas'
+
 CREATE TABLE nas (
   id int(10) NOT NULL auto_increment,
   nasname varchar(128) NOT NULL,
@@ -151,9 +155,8 @@ CREATE TABLE nas (
   KEY nasname (nasname)
 );
 
--- Insert sample data
 INSERT INTO nas (nasname, shortname, type, secret, description) 
-VALUES ('192.168.1.0/24', 'local-network', 'other', 'testing123', 'Local Network Clients');
+VALUES ('192.168.1.0/24', 'local-network', 'other', 'testingr12rrrrrr3', 'Network Clients');
 
 INSERT INTO radcheck (username, attribute, op, value) 
-VALUES ('testing', 'Cleartext-Password', ':=', 'password');
+VALUES ('testing', 'Cleartext-Password', ':=', 'pajjjjssword');

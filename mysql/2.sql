@@ -157,4 +157,4 @@ UNLOCK TABLES;
 
 -- Insert sample NAS entry
 INSERT INTO nas (nasname, shortname, type, secret, description) 
-VALUES ('192.168.1.0/24', 'local-network', 'other', 'testing123', 'Local Network Clients');
+VALUES ('192.168.1.0/24', 'local-network', 'other', 'tusing this 3', 'Local Network Clients');
