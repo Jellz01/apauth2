@@ -18,18 +18,7 @@ function normalize_mac($mac_raw) {
     return strtoupper($hex);
 }
 
-function only_ip($ip_with_port) {
-    // 192.168.0.9:22080 -> 192.168.0.9
-    if (strpos($ip_with_port, ':') !== false) {
-        $parts = explode(':', $ip_with_port, 2);
-        return $parts[0];
-    }
-    return $ip_with_port;
-}
-
 function redirect_to_bienvenido($mac_norm, $ip) {
-    error_log("🎯 REDIRIGIENDO A BIENVENIDO.PHP CON MAC: $mac_norm, IP: $ip");
-
     $_SESSION['registration_mac'] = $mac_norm;
     $_SESSION['registration_ip']  = $ip;
     $_SESSION['coa_executed']     = false;
@@ -55,8 +44,6 @@ function redirect_to_bienvenido($mac_norm, $ip) {
 }
 
 function redirect_to_tyc($mac_norm, $ip) {
-    error_log("🎯 REDIRIGIENDO A TYC.PHP CON MAC: $mac_norm, IP: $ip");
-
     $_SESSION['registration_mac'] = $mac_norm;
     $_SESSION['registration_ip']  = $ip;
 
@@ -155,34 +142,33 @@ try {
 }
 
 /** ============= Parámetros de entrada (TP-Link + compat) ============= */
+
 /*
-Lo que vimos en tu captura:
-[target]   => 192.168.0.9:22080   ← IP del AP, con puerto
-[clientMac]=> 0E:75:42:D5:4F:F4   ← MAC del cliente
-[ap]       => 30:68:93:15:B6:92   ← MAC del AP
-[ssid]     => AP_J0
-[origUrl]  => ...
+TP-Link te está mandando:
+[target]    => 192.168.0.9:22080  (IP/puerto del AP)
+[clientMac] => MAC del cliente
+[ap]        => MAC del AP
+[ssid]      => SSID
+[origUrl]   => URL original
 */
 
-# 1) nombres que manda TU TP-LINK
 $client_mac_raw = $_GET['clientMac'] ?? $_POST['clientMac'] ?? '';
-$ap_mac_raw_tpl = $_GET['ap']       ?? $_POST['ap']       ?? '';  // ← este es el tuyo
-$ap_ip_tpl      = $_GET['target']   ?? $_POST['target']   ?? '';  // viene con puerto
+$ap_mac_raw_tpl = $_GET['ap']        ?? $_POST['ap']        ?? '';   // ← AQUÍ venía "ap" en tu captura
+$ap_ip_tpl      = $_GET['target']    ?? $_POST['target']    ?? '';
 
-# 2) compat con tus nombres viejos
+# compat con tus nombres viejos
 $mac_raw_fallback  = $_GET['mac']    ?? $_POST['mac']    ?? '';
 $ap_raw_fallback   = $_GET['ap_mac'] ?? $_POST['ap_mac'] ?? '';
 $ip_raw_fallback   = $_GET['ip']     ?? $_POST['ip']     ?? '';
-$ssid              = $_GET['ssid']   ?? $_POST['ssid']   ?? '';
-$origUrl           = $_GET['origUrl']?? $_POST['origUrl']?? '';
+$essid             = $_GET['ssid']   ?? $_POST['ssid']   ?? '';
 
-# 3) elegir qué usar al final
+# elegir final
 $mac_raw = $client_mac_raw !== '' ? $client_mac_raw : $mac_raw_fallback;
 $ap_raw  = $ap_mac_raw_tpl !== '' ? $ap_mac_raw_tpl : $ap_raw_fallback;
 
 $ap_ip_default = '192.168.0.9';
 $ap_ip_input   = $ap_ip_tpl !== '' ? $ap_ip_tpl : ($_GET['ap_ip'] ?? $_POST['ap_ip'] ?? $ip_raw_fallback ?? '');
-$ap_ip_clean   = $ap_ip_input !== '' ? only_ip($ap_ip_input) : $ap_ip_default;
+$ap_ip         = trim($ap_ip_input) !== '' ? trim($ap_ip_input) : $ap_ip_default;
 
 $mac_norm = normalize_mac($mac_raw);
 $ap_norm  = normalize_mac($ap_raw);
@@ -197,8 +183,8 @@ $errors = [
     'terminos' => ''
 ];
 
-error_log("🔍 TP-LINK PARAMS → clientMac='{$client_mac_raw}', ap='{$ap_mac_raw_tpl}', target='{$ap_ip_tpl}', ssid='{$ssid}', origUrl='{$origUrl}'");
-error_log("🔍 PARÁMETROS FINALES - MAC_CLIENTE: '$mac_norm', AP_MAC: '$ap_norm', AP_IP: '$ap_ip_clean', IP Cliente (viejo): '$ip'");
+error_log("🔍 TP-LINK PARAMS → clientMac='{$client_mac_raw}', ap='{$ap_mac_raw_tpl}', target='{$ap_ip_tpl}', ssid='{$essid}'");
+error_log("🔍 PARÁMETROS FINALES - MAC_CLIENTE: '$mac_norm', AP_MAC: '$ap_norm', AP_IP: '$ap_ip'");
 
 /** =======================================================
  *  🔎 RESOLVER ZONA / PUBLICIDAD SEGÚN AP O CLIENTE
@@ -208,7 +194,7 @@ $zona_codigo = '';
 $zona_nombre = '';
 $zona_banner = '';
 
-// 1) Si llegó la MAC del AP, buscamos directo en wifi_zona_aps
+// 1) Buscar por MAC del AP (normalizada)
 if ($ap_norm !== '') {
     try {
         $stmtZ = $conn->prepare("
@@ -233,7 +219,7 @@ if ($ap_norm !== '') {
     }
 }
 
-// 2) Si NO vino AP pero sí la MAC del cliente, tratamos de deducir la zona
+// 2) Si no vino AP pero sí cliente (fallback)
 if ($zona_codigo === '' && $mac_norm !== '') {
     try {
         $stmtC = $conn->prepare("
@@ -274,7 +260,7 @@ if ($zona_codigo === '' && $mac_norm !== '') {
     }
 }
 
-// 3) Guardamos en sesión
+// 3) Guardar en sesión
 $_SESSION['wifi_zona_codigo'] = $zona_codigo;
 $_SESSION['wifi_zona_nombre'] = $zona_nombre;
 $_SESSION['wifi_zona_banner'] = $zona_banner;
@@ -282,8 +268,6 @@ $_SESSION['wifi_zona_banner'] = $zona_banner;
 /** ============= Manejo POST ============= */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    error_log("📨 PROCESANDO FORMULARIO POST");
-
     $nombre   = trim($_POST['nombre']   ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
     $cedula   = preg_replace('/\D+/', '', $_POST['cedula'] ?? '');
@@ -294,29 +278,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $mac_post    = $_POST['mac']    ?? '';
     $ip_post     = $_POST['ip']     ?? '';
     $ap_post_raw = $_POST['ap_mac'] ?? $ap_raw;
-    $ap_ip_post  = $_POST['ap_ip']  ?? $ap_ip_clean;
+    $ap_ip_post  = $_POST['ap_ip']  ?? $ap_ip;
 
     $mac_norm   = normalize_mac($mac_post);
     $ap_norm    = normalize_mac($ap_post_raw);
     $ip         = trim($ip_post);
-    $ap_ip_use  = trim($ap_ip_post) !== '' ? only_ip($ap_ip_post) : $ap_ip_clean;
+    $ap_ip      = trim($ap_ip_post) !== '' ? trim($ap_ip_post) : $ap_ip;
 
     if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
     if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
     if (!validarCedulaEC($cedula)) {
-        $errors['cedula'] = 'Cédula inválida. Verifica los 10 dígitos y el dígito verificador.';
+        $errors['cedula'] = 'Cédula inválida.';
     }
     if (!validarTelefonoEC($telefono)) {
-        $errors['telefono'] = 'El teléfono debe empezar con 09 y tener 10 dígitos (ej. 09XXXXXXXX).';
+        $errors['telefono'] = 'Teléfono inválido.';
     }
     if (!validarEmailReal($email)) {
-        $errors['email'] = 'Correo inválido o dominio inexistente. Verifica el email.';
+        $errors['email'] = 'Correo inválido.';
     }
     if (!$terminos) {
-        $errors['terminos'] = 'Debes aceptar los términos y condiciones.';
-    }
-    if ($mac_norm === '') {
-        error_log("❌ MAC address vacía o inválida en POST");
+        $errors['terminos'] = 'Debes aceptar los términos.';
     }
 
     $hayErrores = array_filter($errors, fn($e) => $e !== '');
@@ -324,9 +305,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$hayErrores) {
         try {
             $conn->begin_transaction();
-            error_log("🔄 INICIANDO TRANSACCIÓN BD");
 
-            // 1) Verificar si ya existe en radcheck
+            // ya existe en radcheck?
             $check_radcheck = $conn->prepare("
                 SELECT id FROM radcheck 
                 WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
@@ -345,18 +325,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $check_radcheck->close();
 
-            // 2) Insertar en clients
+            // insertar en clients
             $stmt_clients = $conn->prepare("
                 INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, ap_mac)
                 VALUES (?, ?, ?, ?, ?, ?, 1, ?)
             ");
             $stmt_clients->bind_param("sssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm, $ap_norm);
             $stmt_clients->execute();
-            $client_id = $stmt_clients->insert_id;
             $stmt_clients->close();
-            error_log("✅ CLIENTE INSERTADO con ID: $client_id");
 
-            // 3) Insertar en radcheck
+            // radcheck
             $stmt_radcheck = $conn->prepare("
                 INSERT INTO radcheck (username, attribute, op, value)
                 VALUES (?, 'Auth-Type', ':=', 'Accept')
@@ -364,23 +342,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt_radcheck->bind_param("s", $mac_norm);
             $stmt_radcheck->execute();
             $stmt_radcheck->close();
-            error_log("✅ RADCHECK INSERTADO");
 
             $conn->commit();
-            error_log("✅ TRANSACCIÓN BD COMPLETADA");
 
             $_SESSION['wifi_zona_codigo'] = $zona_codigo;
             $_SESSION['wifi_zona_nombre'] = $zona_nombre;
             $_SESSION['wifi_zona_banner'] = $zona_banner;
 
-            start_coa_async($mac_norm, $ap_ip_use);
+            start_coa_async($mac_norm, $ap_ip);
             redirect_to_bienvenido($mac_norm, $ip);
 
         } catch (Exception $e) {
-            error_log("❌ ERROR EN REGISTRO: " . $e->getMessage());
             if ($conn->errno) {
                 $conn->rollback();
-                error_log("🔄 TRANSACCIÓN REVERTIDA");
             }
 
             if ($conn->errno == 1062) {
@@ -438,11 +412,9 @@ if ($mac_norm !== '') {
         $_SESSION['wifi_zona_codigo'] = $zona_codigo;
         $_SESSION['wifi_zona_nombre'] = $zona_nombre;
         $_SESSION['wifi_zona_banner'] = $zona_banner;
-
         redirect_to_tyc($mac_norm, $ip);
     }
 }
-
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -452,32 +424,87 @@ if ($mac_norm !== '') {
     <title>Registro Wi-Fi - GoNet</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Arial', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; color: #333; }
-        .top-image, .bottom-image { width: 100%; max-width: 400px; border-radius: 15px; margin: 10px 0; box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
-        .form-container { background: white; padding: 30px 25px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.2); width: 100%; max-width: 450px; margin: 20px 0; }
-        h2 { color: #2c3e50; text-align: center; margin-bottom: 25px; font-size: 1.8rem; font-weight: 600; }
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        .top-image, .bottom-image {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 15px;
+            margin: 10px 0;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .form-container {
+            background: white;
+            padding: 30px 25px;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 450px;
+            margin: 20px 0;
+        }
+        h2 { color: #2c3e50; text-align: center; margin-bottom: 20px; font-size: 1.8rem; font-weight: 600; }
         .form-group { margin-bottom: 16px; }
         label { display:block; font-weight:600; margin-bottom:6px; }
-        input { width: 100%; padding: 12px; border: 2px solid #e1e8ed; border-radius: 12px; font-size: 1rem; transition: all 0.3s ease; }
+        input {
+            width: 100%; padding: 12px; border: 2px solid #e1e8ed;
+            border-radius: 12px; font-size: 1rem; transition: all 0.3s ease;
+        }
         input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
-        button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 12px; font-size: 1.05rem; font-weight: 600; cursor: pointer; margin-top: 10px; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); }
+        button {
+            width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white; border: none; border-radius: 12px; font-size: 1.05rem;
+            font-weight: 600; cursor: pointer; margin-top: 10px; transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
         button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
-        .error { background: #ffebee; color: #c62828; padding: 12px; border-radius: 10px; margin: 15px 0; text-align: center; font-size: 0.9rem; border-left: 4px solid #c62828; }
+        .error {
+            background: #ffebee; color: #c62828; padding: 12px; border-radius: 10px;
+            margin: 15px 0; text-align: center; font-size: 0.9rem; border-left: 4px solid #c62828;
+        }
         .field-error { color:#c62828; font-size:0.85rem; margin-top:6px; }
-        .mac-display { background: #f8f9fa; padding: 15px; border-radius: 12px; margin: 15px 0; font-size: 0.95rem; color: #2c3e50; text-align: left; word-wrap: break-word; border: 2px solid #e9ecef; }
-        .mac-display strong { display:block; margin-bottom: 4px; }
-        .info-display { background: #e3f2fd; padding: 12px; border-radius: 10px; margin: 10px 0; font-size: 0.9rem; color: #1565c0; text-align: center; border-left: 4px solid #2196f3; }
-        .status-info { background: #e8f5e8; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 0.95rem; color: #2e7d32; text-align: center; border-left: 4px solid #4caf50; font-weight: 500; }
-        .warning-info { background: #fff3e0; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 0.95rem; color: #ef6c00; text-align: center; border-left: 4px solid #ff9800; }
+        .info-display {
+            background: #e3f2fd; padding: 12px; border-radius: 10px; margin: 10px 0;
+            font-size: 0.9rem; color: #1565c0; text-align: center; border-left: 4px solid #2196f3;
+        }
+        .status-info {
+            background: #e8f5e8; padding: 15px; border-radius: 10px; margin: 15px 0;
+            font-size: 0.95rem; color: #2e7d32; text-align: center; border-left: 4px solid #4caf50;
+            font-weight: 500;
+        }
+        .warning-info {
+            background: #fff3e0; padding: 15px; border-radius: 10px; margin: 15px 0;
+            font-size: 0.95rem; color: #ef6c00; text-align: center; border-left: 4px solid #ff9800;
+        }
         .required::after { content: " *"; color: #e74c3c; }
-        .terminos-container { background: #f8f9fa; padding: 15px; border-radius: 10px; margin: 15px 0; border: 2px solid #e9ecef; }
+        .terminos-container {
+            background: #f8f9fa; padding: 15px; border-radius: 10px; margin: 15px 0;
+            border: 2px solid #e9ecef;
+        }
         .terminos-checkbox { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; }
         .terminos-checkbox input[type="checkbox"] { width: 20px; height: 20px; margin-top: 2px; }
         .terminos-text { font-size: 0.9rem; color: #555; line-height: 1.4; }
         .terminos-link { color: #667eea; text-decoration: none; font-weight: 500; }
         .terminos-link:hover { text-decoration: underline; }
-        .zona-badge { background:#fff3cd; color:#856404; padding:6px 10px; border-radius:999px; font-size:0.75rem; display:inline-block; margin-bottom:10px; }
-        @media (max-width: 480px) { .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; } input, button { font-size: 1rem; } h2 { font-size: 1.5rem; } body { padding: 15px; } }
+        .zona-badge {
+            background:#fff3cd; color:#856404; padding:8px 12px; border-radius:12px;
+            font-size:0.8rem; display:inline-block; margin-bottom:15px; width:100%;
+            text-align:center;
+        }
+        @media (max-width: 480px) {
+            .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; }
+            input, button { font-size: 1rem; }
+            h2 { font-size: 1.5rem; }
+            body { padding: 15px; }
+        }
     </style>
 </head>
 <body>
@@ -487,50 +514,35 @@ if ($mac_norm !== '') {
     <div class="form-container">
         <h2>Registro para Wi-Fi</h2>
 
-        <!-- BADGE DE ZONA -->
+        <!-- 👇 Mostrar zona y AP detectado pero SIN MACs -->
         <?php if ($zona_codigo !== ''): ?>
             <div class="zona-badge">
-                📍 Zona detectada: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong>
+                📍 Zona detectada: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong><br>
+                🟣 AP: <strong>detectado</strong>
+            </div>
+        <?php else: ?>
+            <div class="zona-badge" style="background:#ffecec;color:#b71c1c;">
+                ⚠️ No se pudo determinar la zona de este AP
             </div>
         <?php endif; ?>
 
-        <!-- DEBUG TOP: MAC CLIENTE / AP -->
-        <div class="mac-display">
-            <strong>📱 MAC cliente (clientMac):</strong>
-            <div><?php echo $mac_norm !== '' ? $mac_norm : '— no llegó —'; ?></div>
-            <strong>📡 MAC del AP (ap):</strong>
-            <div><?php echo $ap_norm !== '' ? $ap_norm : '— no llegó —'; ?></div>
-            <strong>🌐 IP del AP (target, sin puerto):</strong>
-            <div><?php echo $ap_ip_clean !== '' ? $ap_ip_clean : '—'; ?></div>
-            <?php if ($ap_ip_input !== '' && $ap_ip_input !== $ap_ip_clean): ?>
-                <small style="color:#999;">(original: <?php echo htmlspecialchars($ap_ip_input); ?>)</small>
-            <?php endif; ?>
-            <?php if ($ssid !== ''): ?>
-                <br><strong>📶 SSID:</strong> <div><?php echo htmlspecialchars($ssid); ?></div>
-            <?php endif; ?>
-            <?php if ($origUrl !== ''): ?>
-                <br><strong>↩️ URL original:</strong> <div><?php echo htmlspecialchars($origUrl); ?></div>
-            <?php endif; ?>
-        </div>
-
         <?php if ($mac_norm === ''): ?>
             <div class="error">
-                ❌ No se detectó la MAC del cliente.<br>
-                <small>Revisa que el AP esté mandando <code>clientMac</code> al portal.</small>
+                ❌ No se detectó ninguna dirección MAC del dispositivo.<br>
+                <small>Conéctate a la red Wi-Fi y vuelve a intentar.</small>
             </div>
         <?php elseif ($mac_status === 'registered'): ?>
             <div class="status-info">
                 ✅ Este dispositivo ya está registrado.<br>
-                <strong>Redirigiendo a Términos y Condiciones...</strong>
+                Redirigiendo...
             </div>
         <?php elseif ($client_exists && $mac_status === 'new'): ?>
             <div class="warning-info">
-                ⚠️ Dispositivo ya visto, pero debe completar datos.<br>
-                <strong>Completa el registro para conectar.</strong>
+                ⚠️ Dispositivo visto antes, completa el registro.
             </div>
         <?php else: ?>
             <div class="info-display">
-                📝 Completa el registro para acceder a Internet
+                📝 Completa el registro para acceder a Internet.
             </div>
         <?php endif; ?>
 
@@ -589,26 +601,25 @@ if ($mac_norm !== '') {
                 <div class="terminos-checkbox">
                     <input type="checkbox" name="terminos" id="terminos" <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?> required>
                     <label for="terminos" class="terminos-text">
-                        Acepto los <a href="terminos.html" target="_blank" class="terminos-link">Términos y Condiciones</a> 
-                        y la <a href="privacidad.html" target="_blank" class="terminos-link">Política de Privacidad</a> 
-                        de GoNet Wi-Fi.
+                        Acepto los <a href="terminos.html" target="_blank" class="terminos-link">Términos y Condiciones</a>
+                        y la <a href="privacidad.html" target="_blank" class="terminos-link">Política de Privacidad</a>.
                     </label>
                 </div>
                 <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['terminos']); ?></div><?php endif; ?>
             </div>
 
-            <!-- 👇 Datos ocultos -->
+            <!-- 👇 Datos ocultos para PHP / DB -->
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
             <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
-            <input type="hidden" name="ap_ip"  value="<?php echo htmlspecialchars($ap_ip_clean); ?>">
+            <input type="hidden" name="ap_ip"  value="<?php echo htmlspecialchars($ap_ip); ?>">
 
             <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
         </form>
         <?php endif; ?>
     </div>
 
-    <!-- 👇 Banner por zona -->
+    <!-- 👇 Publicidad según zona -->
     <?php if ($zona_banner): ?>
         <img src="<?php echo htmlspecialchars($zona_banner); ?>" alt="Publicidad zona <?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?>" class="bottom-image">
     <?php else: ?>
@@ -617,34 +628,18 @@ if ($mac_norm !== '') {
 
     <script>
         const form = document.getElementById('registrationForm');
-        const fields = {
-            nombre:   { el: null, err: null },
-            apellido: { el: null, err: null },
-            cedula:   { el: null, err: null },
-            telefono: { el: null, err: null },
-            email:    { el: null, err: null },
-            terminos: { el: null, err: null },
-        };
-
-        function attach(fieldName) {
-            const input = form?.querySelector(`[name="${fieldName}"]`);
-            const errDiv = input?.parentElement?.querySelector('.field-error') || null;
-            fields[fieldName].el = input;
-            fields[fieldName].err = errDiv;
-        }
-
         if (form) {
-            Object.keys(fields).forEach(attach);
-
-            function setError(field, msg) {
-                if (!fields[field]) return false;
-                const { el, err } = fields[field];
-                if (err) err.textContent = msg || '';
-                if (el) el.setAttribute('aria-invalid', msg ? 'true' : 'false');
-                return !!msg;
-            }
+            const fields = {
+                nombre:   form.querySelector('[name="nombre"]'),
+                apellido: form.querySelector('[name="apellido"]'),
+                cedula:   form.querySelector('[name="cedula"]'),
+                telefono: form.querySelector('[name="telefono"]'),
+                email:    form.querySelector('[name="email"]'),
+                terminos: form.querySelector('[name="terminos"]'),
+            };
 
             function validarCedulaEC(ced) {
+                ced = ced.replace(/\D+/g,'');
                 if (!/^\d{10}$/.test(ced)) return false;
                 const prov = parseInt(ced.slice(0,2),10);
                 if (prov < 1 || prov > 24) return false;
@@ -662,36 +657,78 @@ if ($mac_norm !== '') {
             }
 
             function validarTelefonoEC(tel) {
-                return /^09\d{8}$/.test(tel.replace(/\D+/g,'')); 
+                tel = tel.replace(/\D+/g,'');
+                return /^09\d{8}$/.test(tel);
             }
 
             function validarEmailBasico(mail) {
                 return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail);
             }
 
-            function validateAll() {
-                let hasErrors = false;
-                hasErrors = setError('nombre',   fields.nombre.el.value.trim() ? '' : 'Ingresa tu nombre.') || hasErrors;
-                hasErrors = setError('apellido', fields.apellido.el.value.trim() ? '' : 'Ingresa tu apellido.') || hasErrors;
-
-                const ced = fields.cedula.el.value.replace(/\D+/g,'');
-                hasErrors = setError('cedula', validarCedulaEC(ced) ? '' : 'Cédula inválida. Verifica los 10 dígitos y el dígito verificador.') || hasErrors;
-
-                const tel = fields.telefono.el.value.replace(/\D+/g,'');
-                hasErrors = setError('telefono', validarTelefonoEC(tel) ? '' : 'El teléfono debe empezar con 09 y tener 10 dígitos (ej. 09XXXXXXXX).') || hasErrors;
-
-                hasErrors = setError('email', validarEmailBasico(fields.email.el.value.trim()) ? '' : 'Correo inválido. Verifica el formato.') || hasErrors;
-
-                hasErrors = setError('terminos', fields.terminos.el.checked ? '' : 'Debes aceptar los términos y condiciones.') || hasErrors;
-                return !hasErrors;
+            function setError(input, msg) {
+                let errDiv = input.parentElement.querySelector('.field-error');
+                if (msg) {
+                    if (!errDiv) {
+                        errDiv = document.createElement('div');
+                        errDiv.className = 'field-error';
+                        input.parentElement.appendChild(errDiv);
+                    }
+                    errDiv.textContent = msg;
+                    input.setAttribute('aria-invalid', 'true');
+                } else {
+                    if (errDiv) errDiv.textContent = '';
+                    input.removeAttribute('aria-invalid');
+                }
             }
 
-            ['input','blur','change'].forEach(evt => {
-                form.addEventListener(evt, (e) => {
-                    if (!(e.target && e.target.name)) return;
-                    validateAll();
-                }, true);
-            });
+            function validateAll() {
+                let hasErrors = false;
+
+                if (!fields.nombre.value.trim()) {
+                    setError(fields.nombre, 'Ingresa tu nombre.');
+                    hasErrors = true;
+                } else setError(fields.nombre, '');
+
+                if (!fields.apellido.value.trim()) {
+                    setError(fields.apellido, 'Ingresa tu apellido.');
+                    hasErrors = true;
+                } else setError(fields.apellido, '');
+
+                const ced = fields.cedula.value;
+                if (!validarCedulaEC(ced)) {
+                    setError(fields.cedula, 'Cédula inválida.');
+                    hasErrors = true;
+                } else setError(fields.cedula, '');
+
+                const tel = fields.telefono.value;
+                if (!validarTelefonoEC(tel)) {
+                    setError(fields.telefono, 'Teléfono inválido.');
+                    hasErrors = true;
+                } else setError(fields.telefono, '');
+
+                const mail = fields.email.value;
+                if (!validarEmailBasico(mail)) {
+                    setError(fields.email, 'Correo inválido.');
+                    hasErrors = true;
+                } else setError(fields.email, '');
+
+                if (!fields.terminos.checked) {
+                    // buscamos o creamos el field-error en el contenedor
+                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
+                    if (!errDiv) {
+                        errDiv = document.createElement('div');
+                        errDiv.className = 'field-error';
+                        fields.terminos.closest('.terminos-container').appendChild(errDiv);
+                    }
+                    errDiv.textContent = 'Debes aceptar los términos.';
+                    hasErrors = true;
+                } else {
+                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
+                    if (errDiv) errDiv.textContent = '';
+                }
+
+                return !hasErrors;
+            }
 
             form.addEventListener('submit', function(e) {
                 if (!validateAll()) {
@@ -699,8 +736,14 @@ if ($mac_norm !== '') {
                     return false;
                 }
                 const submitBtn = document.getElementById('submitBtn');
-                submitBtn.innerHTML = '⏳ Procesando...';
-                submitBtn.disabled = true;
+                if (submitBtn) {
+                    submitBtn.innerHTML = '⏳ Procesando...';
+                    submitBtn.disabled = true;
+                }
+            });
+
+            ['input','change','blur'].forEach(evt => {
+                form.addEventListener(evt, () => validateAll(), true);
             });
         }
     </script>
