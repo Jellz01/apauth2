@@ -17,7 +17,7 @@ RUN apk --update add freeradius freeradius-mysql freeradius-eap openssl openssl-
 
 EXPOSE 1812/udp 1813/udp 4325/udp
 
-ENV DB_HOST=localhost
+ENV DB_HOST=mysql
 ENV DB_PORT=3306
 ENV DB_USER=radius
 ENV DB_PASS=radpass
