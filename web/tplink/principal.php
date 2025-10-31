@@ -499,6 +499,22 @@ if ($mac_norm !== '') {
             font-size:0.8rem; display:inline-block; margin-bottom:15px; width:100%;
             text-align:center;
         }
+        .admin-link {
+            margin-top: 15px;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        .admin-link a {
+            color: #fff;
+            background: rgba(0,0,0,0.3);
+            padding: 8px 16px;
+            border-radius: 999px;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .admin-link a:hover {
+            background: rgba(0,0,0,0.5);
+        }
         @media (max-width: 480px) {
             .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; }
             input, button { font-size: 1rem; }
@@ -626,6 +642,12 @@ if ($mac_norm !== '') {
         <img src="banner.png" alt="Banner" class="bottom-image">
     <?php endif; ?>
 
+    <!-- 👇 Link al portal de administración -->
+    <div class="admin-link">
+        <p>🔐 Iniciar al portal de administración</p>
+        <a href="admin_zonas.php">Ir a admin_zonas.php</a>
+    </div>
+
     <script>
         const form = document.getElementById('registrationForm');
         if (form) {
@@ -713,7 +735,6 @@ if ($mac_norm !== '') {
                 } else setError(fields.email, '');
 
                 if (!fields.terminos.checked) {
-                    // buscamos o creamos el field-error en el contenedor
                     let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
                     if (!errDiv) {
                         errDiv = document.createElement('div');
