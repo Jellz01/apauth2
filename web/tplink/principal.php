@@ -10,14 +10,31 @@ $user = "radius";
 $pass = "radpass";
 $db   = "radius";
 
-/** ===================== Helpers ===================== */
-
+/* =========================================================
+ * HELPER: normalizar MAC (quitar :, -, ., espacios)
+ * ========================================================= */
 function normalize_mac($mac_raw) {
     if (empty($mac_raw)) return '';
     $hex = preg_replace('/[^0-9A-Fa-f]/', '', (string)$mac_raw);
     return strtoupper($hex);
 }
 
+/* =========================================================
+ * HELPER: extraer solo IP si viene "192.168.0.9:22080"
+ * ========================================================= */
+function only_ip_part($str) {
+    if (!$str) return '';
+    // si viene con puerto -> separar
+    if (strpos($str, ':') !== false) {
+        $parts = explode(':', $str);
+        return $parts[0];
+    }
+    return $str;
+}
+
+/* =========================================================
+ * REDIRECCIONES
+ * ========================================================= */
 function redirect_to_bienvenido($mac_norm, $ip) {
     $_SESSION['registration_mac'] = $mac_norm;
     $_SESSION['registration_ip']  = $ip;
@@ -67,13 +84,16 @@ function redirect_to_tyc($mac_norm, $ip) {
     }
 }
 
-/** CoA en background */
+/* =========================================================
+ * HELPER: lanzar CoA en background
+ * ========================================================= */
 function start_coa_async($mac, $ap_ip) {
     if (empty($mac) || empty($ap_ip)) {
         error_log("❌ start_coa_async: mac o ap_ip vacíos");
         return false;
     }
 
+    // ojo: si llegó con puerto ya lo limpiamos antes de llamarlo
     $coa_secret = "telecom";
     $coa_port   = "4325";
 
@@ -87,12 +107,56 @@ function start_coa_async($mac, $ap_ip) {
     );
 
     error_log("🚀 Lanzando CoA en background: $cmd");
-    exec($cmd);
+    @exec($cmd);
     return true;
 }
 
-/** ===================== Validaciones ===================== */
+/* =========================================================
+ * HELPER: avisar al controlador TP-Link / Omada
+ * (ajusta la URL a tu controlador)
+ * ========================================================= */
+function omada_allow_client($controller_base, $token, $clientMac, $apMac, $ssid) {
+    // si no hay token ni base no hacemos nada
+    if (!$controller_base || !$clientMac) {
+        error_log("⚠️ omada_allow_client: faltan datos (controller_base o clientMac)");
+        return;
+    }
 
+    // endpoint típico de Omada ext portal (AJUSTA si tu versión usa otro)
+    // muchos usan: /extportal/auth, /portal/extPortal/auth o /api/v2/hotspot/extPortal/auth
+    $url = rtrim($controller_base, "/") . "/portal/extPortal/auth";
+
+    $payload = [
+        "success"   => true,
+        "clientMac" => $clientMac,
+        "apMac"     => $apMac,
+        "ssid"      => $ssid,
+        "token"     => $token,
+        "authType"  => "radius",
+    ];
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_POSTFIELDS     => json_encode($payload),
+        CURLOPT_TIMEOUT        => 3,
+    ]);
+    $resp = curl_exec($ch);
+    $err  = curl_error($ch);
+    curl_close($ch);
+
+    if ($err) {
+        error_log("❌ omada_allow_client CURL error: $err");
+    } else {
+        error_log("✅ omada_allow_client enviado a $url → $resp");
+    }
+}
+
+/* =========================================================
+ * VALIDACIONES ECU
+ * ========================================================= */
 function validarCedulaEC(string $cedula): bool {
     if (!preg_match('/^\d{10}$/', $cedula)) return false;
 
@@ -129,8 +193,9 @@ function validarEmailReal(string $email): bool {
     return (function_exists('checkdnsrr')) ? ($mxOk || $aOk) : true;
 }
 
-/** ============= Conexión a la Base de Datos ============= */
-
+/* =========================================================
+ * CONEXIÓN BD
+ * ========================================================= */
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 try {
     $conn = new mysqli($host, $user, $pass, $db);
@@ -141,34 +206,34 @@ try {
     die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($e->getMessage()) . "</div>");
 }
 
-/** ============= Parámetros de entrada (TP-Link + compat) ============= */
-
-/*
-TP-Link te está mandando:
-[target]    => 192.168.0.9:22080  (IP/puerto del AP)
-[clientMac] => MAC del cliente
-[ap]        => MAC del AP
-[ssid]      => SSID
-[origUrl]   => URL original
-*/
-
+/* =========================================================
+ * PARÁMETROS QUE MANDA TP-LINK / OMADA
+ * =========================================================
+ * target    -> 192.168.0.9:22080
+ * clientMac -> MAC del cliente
+ * ap        -> MAC del AP
+ * ssid      -> SSID
+ * token     -> token de sesión del portal (a veces)
+ */
 $client_mac_raw = $_GET['clientMac'] ?? $_POST['clientMac'] ?? '';
-$ap_mac_raw_tpl = $_GET['ap']        ?? $_POST['ap']        ?? '';   // ← AQUÍ venía "ap" en tu captura
+$ap_mac_raw_tpl = $_GET['ap']        ?? $_POST['ap']        ?? '';
 $ap_ip_tpl      = $_GET['target']    ?? $_POST['target']    ?? '';
+$token_omada    = $_GET['token']     ?? $_POST['token']     ?? '';
+$essid          = $_GET['ssid']      ?? $_POST['ssid']      ?? '';
 
-# compat con tus nombres viejos
+/* compat con tus nombres viejos */
 $mac_raw_fallback  = $_GET['mac']    ?? $_POST['mac']    ?? '';
 $ap_raw_fallback   = $_GET['ap_mac'] ?? $_POST['ap_mac'] ?? '';
 $ip_raw_fallback   = $_GET['ip']     ?? $_POST['ip']     ?? '';
-$essid             = $_GET['ssid']   ?? $_POST['ssid']   ?? '';
 
-# elegir final
+/* elegir finales */
 $mac_raw = $client_mac_raw !== '' ? $client_mac_raw : $mac_raw_fallback;
 $ap_raw  = $ap_mac_raw_tpl !== '' ? $ap_mac_raw_tpl : $ap_raw_fallback;
 
-$ap_ip_default = '192.168.0.9';
+$ap_ip_default = '192.168.0.9'; // por si no manda nada
 $ap_ip_input   = $ap_ip_tpl !== '' ? $ap_ip_tpl : ($_GET['ap_ip'] ?? $_POST['ap_ip'] ?? $ip_raw_fallback ?? '');
-$ap_ip         = trim($ap_ip_input) !== '' ? trim($ap_ip_input) : $ap_ip_default;
+$ap_ip_clean   = only_ip_part($ap_ip_input);
+$ap_ip         = $ap_ip_clean !== '' ? $ap_ip_clean : $ap_ip_default;
 
 $mac_norm = normalize_mac($mac_raw);
 $ap_norm  = normalize_mac($ap_raw);
@@ -183,18 +248,17 @@ $errors = [
     'terminos' => ''
 ];
 
-error_log("🔍 TP-LINK PARAMS → clientMac='{$client_mac_raw}', ap='{$ap_mac_raw_tpl}', target='{$ap_ip_tpl}', ssid='{$essid}'");
+error_log("🔍 TP-LINK PARAMS → clientMac='{$client_mac_raw}', ap='{$ap_mac_raw_tpl}', target='{$ap_ip_tpl}', token='{$token_omada}', ssid='{$essid}'");
 error_log("🔍 PARÁMETROS FINALES - MAC_CLIENTE: '$mac_norm', AP_MAC: '$ap_norm', AP_IP: '$ap_ip'");
 
-/** =======================================================
- *  🔎 RESOLVER ZONA / PUBLICIDAD SEGÚN AP O CLIENTE
- *  ======================================================= */
-
+/* =========================================================
+ *  RESOLVER ZONA POR AP
+ * ========================================================= */
 $zona_codigo = '';
 $zona_nombre = '';
 $zona_banner = '';
 
-// 1) Buscar por MAC del AP (normalizada)
+// 1) directa por AP
 if ($ap_norm !== '') {
     try {
         $stmtZ = $conn->prepare("
@@ -219,7 +283,7 @@ if ($ap_norm !== '') {
     }
 }
 
-// 2) Si no vino AP pero sí cliente (fallback)
+// 2) fallback por cliente
 if ($zona_codigo === '' && $mac_norm !== '') {
     try {
         $stmtC = $conn->prepare("
@@ -249,7 +313,7 @@ if ($zona_codigo === '' && $mac_norm !== '') {
                     $zona_codigo = $rowZ2['codigo'];
                     $zona_nombre = $rowZ2['nombre'];
                     $zona_banner = $rowZ2['banner_url'];
-                    error_log("✅ Zona detectada por MAC de cliente: $mac_norm → {$zona_codigo}");
+                    error_log("✅ Zona detectada por MAC cliente: $mac_norm → {$zona_codigo}");
                 }
                 $stmtZ2->close();
             }
@@ -260,13 +324,14 @@ if ($zona_codigo === '' && $mac_norm !== '') {
     }
 }
 
-// 3) Guardar en sesión
+/* guardar en sesión la zona detectada */
 $_SESSION['wifi_zona_codigo'] = $zona_codigo;
 $_SESSION['wifi_zona_nombre'] = $zona_nombre;
 $_SESSION['wifi_zona_banner'] = $zona_banner;
 
-/** ============= Manejo POST ============= */
-
+/* =========================================================
+ * MANEJO POST (registro)
+ * ========================================================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $nombre   = trim($_POST['nombre']   ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
@@ -283,7 +348,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $mac_norm   = normalize_mac($mac_post);
     $ap_norm    = normalize_mac($ap_post_raw);
     $ip         = trim($ip_post);
-    $ap_ip      = trim($ap_ip_post) !== '' ? trim($ap_ip_post) : $ap_ip;
+    $ap_ip      = only_ip_part($ap_ip_post) ?: $ap_ip;
 
     if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
     if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
@@ -306,7 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $conn->begin_transaction();
 
-            // ya existe en radcheck?
+            // 1) ya existe en radcheck?
             $check_radcheck = $conn->prepare("
                 SELECT id FROM radcheck 
                 WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
@@ -318,6 +383,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($check_radcheck->num_rows > 0) {
                 $check_radcheck->close();
                 $conn->commit();
+
+                // avisar a Omada igual
+                $omada_url = 'http://192.168.0.9:8088'; // AJUSTA
+                omada_allow_client($omada_url, $token_omada, $mac_norm, $ap_norm, $essid);
+
                 $_SESSION['wifi_zona_codigo'] = $zona_codigo;
                 $_SESSION['wifi_zona_nombre'] = $zona_nombre;
                 $_SESSION['wifi_zona_banner'] = $zona_banner;
@@ -325,7 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $check_radcheck->close();
 
-            // insertar en clients
+            // 2) insert en clients
             $stmt_clients = $conn->prepare("
                 INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, ap_mac)
                 VALUES (?, ?, ?, ?, ?, ?, 1, ?)
@@ -334,7 +404,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt_clients->execute();
             $stmt_clients->close();
 
-            // radcheck
+            // 3) insert en radcheck
             $stmt_radcheck = $conn->prepare("
                 INSERT INTO radcheck (username, attribute, op, value)
                 VALUES (?, 'Auth-Type', ':=', 'Accept')
@@ -345,11 +415,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $conn->commit();
 
+            // avisar a Omada que ya está ok
+            $omada_url = 'http://192.168.0.9:8088'; // AJUSTA a tu controlador
+            omada_allow_client($omada_url, $token_omada, $mac_norm, $ap_norm, $essid);
+
+            // guardar zona
             $_SESSION['wifi_zona_codigo'] = $zona_codigo;
             $_SESSION['wifi_zona_nombre'] = $zona_nombre;
             $_SESSION['wifi_zona_banner'] = $zona_banner;
 
+            // CoA
             start_coa_async($mac_norm, $ap_ip);
+
             redirect_to_bienvenido($mac_norm, $ip);
 
         } catch (Exception $e) {
@@ -358,6 +435,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if ($conn->errno == 1062) {
+                // duplicado → mandar a TYC
                 $_SESSION['wifi_zona_codigo'] = $zona_codigo;
                 $_SESSION['wifi_zona_nombre'] = $zona_nombre;
                 $_SESSION['wifi_zona_banner'] = $zona_banner;
@@ -375,8 +453,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-/** ============= Estado de la MAC para la UI / redirección temprana ============= */
-
+/* =========================================================
+ * ESTADO DE MAC (para redir temprana)
+ * ========================================================= */
 $mac_status    = 'new';
 $client_exists = false;
 if ($mac_norm !== '') {
@@ -409,6 +488,10 @@ if ($mac_norm !== '') {
     }
 
     if ($mac_status === 'registered') {
+        // avisar también a Omada por si viene con token
+        $omada_url = 'http://192.168.0.9:8088'; // AJUSTA
+        omada_allow_client($omada_url, $token_omada, $mac_norm, $ap_norm, $essid);
+
         $_SESSION['wifi_zona_codigo'] = $zona_codigo;
         $_SESSION['wifi_zona_nombre'] = $zona_nombre;
         $_SESSION['wifi_zona_banner'] = $zona_banner;
@@ -530,7 +613,6 @@ if ($mac_norm !== '') {
     <div class="form-container">
         <h2>Registro para Wi-Fi</h2>
 
-        <!-- 👇 Mostrar zona y AP detectado pero SIN MACs -->
         <?php if ($zona_codigo !== ''): ?>
             <div class="zona-badge">
                 📍 Zona detectada: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong><br>
@@ -624,7 +706,7 @@ if ($mac_norm !== '') {
                 <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['terminos']); ?></div><?php endif; ?>
             </div>
 
-            <!-- 👇 Datos ocultos para PHP / DB -->
+            <!-- Datos ocultos -->
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
             <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
@@ -635,14 +717,14 @@ if ($mac_norm !== '') {
         <?php endif; ?>
     </div>
 
-    <!-- 👇 Publicidad según zona -->
+    <!-- Publicidad -->
     <?php if ($zona_banner): ?>
         <img src="<?php echo htmlspecialchars($zona_banner); ?>" alt="Publicidad zona <?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?>" class="bottom-image">
     <?php else: ?>
         <img src="banner.png" alt="Banner" class="bottom-image">
     <?php endif; ?>
 
-    <!-- 👇 Link al portal de administración -->
+    <!-- Link admin -->
     <div class="admin-link">
         <p>🔐 Iniciar al portal de administración</p>
         <a href="admin_zonas.php">Ir a admin_zonas.php</a>
