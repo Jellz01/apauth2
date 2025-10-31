@@ -1,4 +1,3 @@
-version: "3.9"
 
 services:
   mysql:
@@ -35,7 +34,7 @@ services:
       RADIUS_KEY: telecom 
     volumes:
       - ./Freeradius/scripts:/docker-entrypoint-initdb.d:ro 
-    # uncomment if you need to reach RADIUS from the host:
+    
     ports:
        - "1812:1812/udp"
        - "1813:1813/udp"
@@ -46,7 +45,7 @@ services:
       - backend
 
   php:
-    build: ./web
+    build: ./web/tplink
     container_name: php_web
     restart: always
     depends_on:
