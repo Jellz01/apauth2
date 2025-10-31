@@ -54,8 +54,8 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./web:/var/www/html
-      - ./web/php-upload.ini:/usr/local/etc/php/conf.d/php-upload.ini
+      - ./web/tplink:/var/www/html
+      - ./web/tplink/php-upload.ini:/usr/local/etc/php/conf.d/php-upload.ini
     environment:
       MYSQL_HOST: mysql
       MYSQL_USER: radius
