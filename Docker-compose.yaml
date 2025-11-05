@@ -22,7 +22,7 @@ services:
       - backend
 
   freeradius:
-    build: ./FreeRadius
+    image: 2stacks/freeradius:latest
     container_name: freeradiustp
     environment:
       DB_HOST: mysql
@@ -33,7 +33,9 @@ services:
       RAD_CLIENTS: 192.168.0.9
       RADIUS_KEY: telecom 
     volumes:
-      - ./Freeradius/scripts:/docker-entrypoint-initdb.d:ro 
+      - ./FreeRadius/scripts:/docker-entrypoint-initdb.d:ro 
+      - ./FreeRadius/etc/raddb.d:/etc/raddb/.d:ro
+      
     
     ports:
        - "1812:1812/udp"
