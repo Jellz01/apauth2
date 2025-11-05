@@ -22,7 +22,7 @@ services:
       - backend
 
   freeradius:
-    build: ./Freeradius
+    build: ./FreeRadius
     container_name: freeradiustp
     environment:
       DB_HOST: mysql
