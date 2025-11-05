@@ -34,7 +34,7 @@ services:
       RADIUS_KEY: telecom 
     volumes:
       - ./FreeRadius/scripts:/docker-entrypoint-initdb.d:ro 
-      - ./FreeRadius/etc/raddb.d:/etc/raddb/.d:ro
+      - ./FreeRadius/etc/raddb/clients.conf:/etc/freeradius/3.0/clients.conf:ro
       
     
     ports:
