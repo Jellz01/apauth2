@@ -405,12 +405,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             } else {
                 $check->close();
 
-                // Insertar en clients
+                // ⬇⬇⬇ INSERT EN clients (ajustado a tus columnas, sin 'ip')
                 $stmt_clients = $conn->prepare("
-                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, ap_mac, ip)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 ");
-                $stmt_clients->bind_param("ssssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm, $ap_norm, $client_ip);
+                $stmt_clients->bind_param("sssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm, $ap_norm);
                 $stmt_clients->execute();
                 $stmt_clients->close();
                 error_log("✅ Cliente insertado en tabla clients");
@@ -433,7 +433,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             tplink_authorize_client($mac_norm, $ap_norm, $ssid, $token);
             
             // Forzar re-autenticación con CoA
-            sleep(1); // Pequeña pausa para que se registre
+            sleep(1); // Pausa corta
             trigger_coa_disconnect($mac_norm);
             
             error_log("✅ Registro completado, redirigiendo a bienvenido");
