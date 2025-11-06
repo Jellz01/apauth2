@@ -28,9 +28,9 @@ services:
       DB_HOST: mysql
       DB_NAME: radius
       DB_USER: radius
-      DB_PASS: radpass         # ← match MySQL user password
+      DB_PASS: radpass         
       RAD_DEBUG: "yes"
-      RAD_CLIENTS: 192.168.0.9
+      RAD_CLIENTS: 192.168.0.7
       RADIUS_KEY: telecom 
     volumes:
       - ./FreeRadius/scripts:/docker-entrypoint-initdb.d:ro 
