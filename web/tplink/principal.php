@@ -636,4 +636,160 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             <div class="form-group">
                 <label class="required">Email</label>
                 <input type="email" name="email" placeholder="correo@ejemplo.com" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
-                <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['email']); ?>
+                <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['email']); ?></div><?php endif; ?>
+            </div>
+
+            <div class="terminos-container">
+                <div class="terminos-checkbox">
+                    <input type="checkbox" name="terminos" id="terminos" <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?> required>
+                    <label for="terminos" class="terminos-text">
+                        Acepto los <a href="terminos.html" target="_blank" class="terminos-link">Términos y Condiciones</a>
+                        y la <a href="privacidad.html" target="_blank" class="terminos-link">Política de Privacidad</a>.
+                    </label>
+                </div>
+                <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['terminos']); ?></div><?php endif; ?>
+            </div>
+
+            <!-- Campos ocultos -->
+            <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
+            <input type="hidden" name="ip" value="<?php echo htmlspecialchars($client_ip); ?>">
+            <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
+            <input type="hidden" name="ap_ip" value="<?php echo htmlspecialchars($ap_ip); ?>">
+            <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
+            <input type="hidden" name="ssid" value="<?php echo htmlspecialchars($ssid); ?>">
+
+            <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
+        </form>
+        <?php endif; ?>
+    </div>
+
+    <!-- Publicidad -->
+    <?php if ($zona_banner): ?>
+        <img src="<?php echo htmlspecialchars($zona_banner); ?>" alt="Publicidad" class="bottom-image" onerror="this.style.display='none'">
+    <?php else: ?>
+        <img src="banner.png" alt="Banner" class="bottom-image" onerror="this.style.display='none'">
+    <?php endif; ?>
+
+    <script>
+        const form = document.getElementById('registrationForm');
+        if (form) {
+            const fields = {
+                nombre:   form.querySelector('[name="nombre"]'),
+                apellido: form.querySelector('[name="apellido"]'),
+                cedula:   form.querySelector('[name="cedula"]'),
+                telefono: form.querySelector('[name="telefono"]'),
+                email:    form.querySelector('[name="email"]'),
+                terminos: form.querySelector('[name="terminos"]'),
+            };
+
+            function validarCedulaEC(ced) {
+                ced = ced.replace(/\D+/g,'');
+                if (!/^\d{10}$/.test(ced)) return false;
+                const prov = parseInt(ced.slice(0,2),10);
+                if (prov < 1 || prov > 24) return false;
+                const t = parseInt(ced[2],10);
+                if (t >= 6) return false;
+                const coef = [2,1,2,1,2,1,2,1,2];
+                let suma = 0;
+                for (let i=0;i<9;i++){
+                    let prod = parseInt(ced[i],10) * coef[i];
+                    if (prod >= 10) prod -= 9;
+                    suma += prod;
+                }
+                const dv = (10 - (suma % 10)) % 10;
+                return dv === parseInt(ced[9],10);
+            }
+
+            function validarTelefonoEC(tel) {
+                tel = tel.replace(/\D+/g,'');
+                return /^09\d{8}$/.test(tel);
+            }
+
+            function validarEmailBasico(mail) {
+                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail);
+            }
+
+            function setError(input, msg) {
+                let errDiv = input.parentElement.querySelector('.field-error');
+                if (msg) {
+                    if (!errDiv) {
+                        errDiv = document.createElement('div');
+                        errDiv.className = 'field-error';
+                        input.parentElement.appendChild(errDiv);
+                    }
+                    errDiv.textContent = msg;
+                    input.setAttribute('aria-invalid', 'true');
+                } else {
+                    if (errDiv) errDiv.textContent = '';
+                    input.removeAttribute('aria-invalid');
+                }
+            }
+
+            function validateAll() {
+                let hasErrors = false;
+
+                if (!fields.nombre.value.trim()) {
+                    setError(fields.nombre, 'Ingresa tu nombre.');
+                    hasErrors = true;
+                } else setError(fields.nombre, '');
+
+                if (!fields.apellido.value.trim()) {
+                    setError(fields.apellido, 'Ingresa tu apellido.');
+                    hasErrors = true;
+                } else setError(fields.apellido, '');
+
+                const ced = fields.cedula.value;
+                if (!validarCedulaEC(ced)) {
+                    setError(fields.cedula, 'Cédula inválida.');
+                    hasErrors = true;
+                } else setError(fields.cedula, '');
+
+                const tel = fields.telefono.value;
+                if (!validarTelefonoEC(tel)) {
+                    setError(fields.telefono, 'Teléfono inválido.');
+                    hasErrors = true;
+                } else setError(fields.telefono, '');
+
+                const mail = fields.email.value;
+                if (!validarEmailBasico(mail)) {
+                    setError(fields.email, 'Correo inválido.');
+                    hasErrors = true;
+                } else setError(fields.email, '');
+
+                if (!fields.terminos.checked) {
+                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
+                    if (!errDiv) {
+                        errDiv = document.createElement('div');
+                        errDiv.className = 'field-error';
+                        fields.terminos.closest('.terminos-container').appendChild(errDiv);
+                    }
+                    errDiv.textContent = 'Debes aceptar los términos.';
+                    hasErrors = true;
+                } else {
+                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
+                    if (errDiv) errDiv.textContent = '';
+                }
+
+                return !hasErrors;
+            }
+
+            form.addEventListener('submit', function(e) {
+                if (!validateAll()) {
+                    e.preventDefault();
+                    return false;
+                }
+                const submitBtn = document.getElementById('submitBtn');
+                if (submitBtn) {
+                    submitBtn.innerHTML = '⏳ Procesando...';
+                    submitBtn.disabled = true;
+                }
+            });
+
+            ['input','change','blur'].forEach(evt => {
+                form.addEventListener(evt, () => validateAll(), true);
+            });
+        }
+    </script>
+
+</body>
+</html>
