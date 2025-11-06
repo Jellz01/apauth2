@@ -5,6 +5,20 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+// Log file para debug extensivo
+$debug_log = "/tmp/portal_debug.log";
+file_put_contents($debug_log, "======= NUEVA SESIÓN PORTAL =======\n", FILE_APPEND);
+
+function debug_log($message) {
+    global $debug_log;
+    $timestamp = date('Y-m-d H:i:s');
+    $log_message = "[$timestamp] $message\n";
+    file_put_contents($debug_log, $log_message, FILE_APPEND);
+    error_log($message); // También al error log normal
+}
+
+debug_log("🎬 SCRIPT INICIADO");
+
 /* ===================== DB CONFIG ===================== */
 $host = "mysql";
 $user = "radius";
@@ -20,20 +34,31 @@ define('COA_PORT', '3799');
  * HELPER: normalizar MAC (quitar :, -, ., espacios)
  * ========================================================= */
 function normalize_mac($mac_raw) {
-    if (empty($mac_raw)) return '';
+    if (empty($mac_raw)) {
+        debug_log("❌ MAC raw está vacía");
+        return '';
+    }
     $hex = preg_replace('/[^0-9A-Fa-f]/', '', (string)$mac_raw);
-    return strtoupper($hex);
+    $result = strtoupper($hex);
+    debug_log("🔧 MAC normalizada: '$mac_raw' -> '$result'");
+    return $result;
 }
 
 /* =========================================================
  * HELPER: extraer solo IP si viene "192.168.0.9:22080"
  * ========================================================= */
 function only_ip_part($str) {
-    if (!$str) return '';
+    if (!$str) {
+        debug_log("❌ IP string vacía");
+        return '';
+    }
     if (strpos($str, ':') !== false) {
         $parts = explode(':', $str);
-        return $parts[0];
+        $result = $parts[0];
+        debug_log("🔧 IP extraída: '$str' -> '$result'");
+        return $result;
     }
+    debug_log("🔧 IP limpia: '$str'");
     return $str;
 }
 
@@ -41,6 +66,7 @@ function only_ip_part($str) {
  * REDIRECCIONES
  * ========================================================= */
 function redirect_to_bienvenido($mac_norm, $ip) {
+    debug_log("🔄 Redirigiendo a bienvenido.php - MAC: $mac_norm, IP: $ip");
     $_SESSION['registration_mac'] = $mac_norm;
     $_SESSION['registration_ip']  = $ip;
     $_SESSION['coa_executed']     = false;
@@ -66,6 +92,7 @@ function redirect_to_bienvenido($mac_norm, $ip) {
 }
 
 function redirect_to_tyc($mac_norm, $ip) {
+    debug_log("🔄 Redirigiendo a tyc.php - MAC: $mac_norm, IP: $ip");
     $_SESSION['registration_mac'] = $mac_norm;
     $_SESSION['registration_ip']  = $ip;
 
@@ -94,7 +121,7 @@ function redirect_to_tyc($mac_norm, $ip) {
  * ========================================================= */
 function trigger_coa_disconnect($mac) {
     if (empty($mac)) {
-        error_log("❌ trigger_coa_disconnect: MAC vacía");
+        debug_log("❌ trigger_coa_disconnect: MAC vacía");
         return false;
     }
 
@@ -111,7 +138,7 @@ function trigger_coa_disconnect($mac) {
         escapeshellarg($secret)
     );
 
-    error_log("🚀 Lanzando CoA: $cmd");
+    debug_log("🚀 Lanzando CoA: $cmd");
     @exec($cmd);
     return true;
 }
@@ -121,6 +148,8 @@ function trigger_coa_disconnect($mac) {
  * En Omada no es necesario; dejamos como fallback.
  * ========================================================= */
 function tplink_authorize_client($clientMac, $apMac = '', $ssid = '', $token = '') {
+    debug_log("🔐 Intentando autorización directa TP-Link - MAC: $clientMac, AP: $apMac, SSID: $ssid");
+    
     $ap_ip = AP_IP;
     $endpoints = [
         "http://{$ap_ip}/portal_auth.cgi",
@@ -138,7 +167,7 @@ function tplink_authorize_client($clientMac, $apMac = '', $ssid = '', $token = '
     if ($ssid)  $payload['ssid']  = $ssid;
     if ($token) $payload['token'] = $token;
 
-    error_log("🔐 Intentando autorizar cliente (fallback): " . json_encode($payload));
+    debug_log("📦 Payload TP-Link: " . json_encode($payload));
 
     foreach ($endpoints as $url) {
         $ch = curl_init($url);
@@ -156,14 +185,14 @@ function tplink_authorize_client($clientMac, $apMac = '', $ssid = '', $token = '
         $err = curl_error($ch);
         curl_close($ch);
 
-        error_log("🔍 Endpoint: $url → HTTP $http_code → Resp: $resp");
+        debug_log("🔍 Endpoint TP-Link: $url → HTTP $http_code → Resp: $resp → Error: $err");
         if ($http_code >= 200 && $http_code < 300) {
-            error_log("✅ Cliente autorizado en: $url");
+            debug_log("✅ Cliente autorizado en TP-Link: $url");
             return true;
         }
     }
 
-    error_log("⚠️ No se pudo notificar al AP directamente (fallback).");
+    debug_log("⚠️ No se pudo notificar al AP directamente (fallback).");
     return false;
 }
 
@@ -173,7 +202,7 @@ function tplink_authorize_client($clientMac, $apMac = '', $ssid = '', $token = '
  * ========================================================= */
 function omada_radius_browserauth($target, $targetPort, $username, $password, $clientMac, $clientIp, $apMac, $ssidName, $radioId, $originUrl) {
     if (!$target || !$targetPort) {
-        error_log("❌ browserauth: faltan target/targetPort");
+        debug_log("❌ browserauth: faltan target/targetPort");
         return false;
     }
 
@@ -181,8 +210,10 @@ function omada_radius_browserauth($target, $targetPort, $username, $password, $c
     $scheme = ($targetPort == '8043' || $targetPort == 8043) ? "https" : "http";
     $url = "{$scheme}://{$target}:{$targetPort}/portal/radius/browserauth";
 
+    debug_log("🎯 BROWSERAUTH URL COMPLETA: $url");
+
     // x-www-form-urlencoded evita CORS y es lo esperado por Omada
-    $fields = http_build_query([
+    $fields = [
         'username'   => $username,
         'password'   => $password,
         'clientMac'  => $clientMac,
@@ -191,27 +222,65 @@ function omada_radius_browserauth($target, $targetPort, $username, $password, $c
         'ssidName'   => $ssidName,
         'radioId'    => ($radioId === '' ? '0' : $radioId),
         'originUrl'  => $originUrl,
-    ]);
+    ];
+
+    $postData = http_build_query($fields);
+    
+    debug_log("📤 BROWSERAUTH PAYLOAD:");
+    debug_log("  URL: $url");
+    debug_log("  Username: $username");
+    debug_log("  Password: $password");
+    debug_log("  ClientMac: $clientMac");
+    debug_log("  ClientIp: $clientIp");
+    debug_log("  ApMac: $apMac");
+    debug_log("  SsidName: $ssidName");
+    debug_log("  RadioId: $radioId");
+    debug_log("  OriginUrl: $originUrl");
+    debug_log("  Full POST Data: $postData");
 
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
-        CURLOPT_POSTFIELDS     => $fields,
-        CURLOPT_TIMEOUT        => 6,
-        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_POSTFIELDS     => $postData,
+        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_CONNECTTIMEOUT => 5,
         // En laboratorios locales, el cert puede ser self-signed:
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_VERBOSE        => true,
+        CURLOPT_HEADER         => true,
     ]);
+    
+    $verbose = fopen('php://temp', 'w+');
+    curl_setopt($ch, CURLOPT_STDERR, $verbose);
+    
     $resp = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);
+    
+    // Log verbose output
+    rewind($verbose);
+    $verboseLog = stream_get_contents($verbose);
+    fclose($verbose);
+    
     curl_close($ch);
 
-    error_log("📡 browserauth POST {$url} → HTTP $code; resp: $resp; err: $err");
-    return ($code >= 200 && $code < 300);
+    debug_log("📡 BROWSERAUTH RESPUESTA:");
+    debug_log("  HTTP Code: $code");
+    debug_log("  Response: $resp");
+    debug_log("  Error: $err");
+    debug_log("  Verbose Output: $verboseLog");
+
+    $success = ($code >= 200 && $code < 300);
+    if ($success) {
+        debug_log("✅ BROWSERAUTH EXITOSO");
+    } else {
+        debug_log("❌ BROWSERAUTH FALLIDO");
+    }
+    
+    return $success;
 }
 
 /* =========================================================
@@ -221,36 +290,45 @@ mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 try {
     $conn = new mysqli($host, $user, $pass, $db);
     $conn->set_charset('utf8mb4');
-    error_log("✅ CONEXIÓN BD EXITOSA");
+    debug_log("✅ CONEXIÓN BD EXITOSA");
 } catch (Exception $e) {
-    error_log("❌ ERROR CONEXIÓN BD: " . $e->getMessage());
+    debug_log("❌ ERROR CONEXIÓN BD: " . $e->getMessage());
     die("<div class='error'>❌ Database connection failed: " . htmlspecialchars($e->getMessage()) . "</div>");
 }
 
 /* =========================================================
  * LOG TODOS LOS PARÁMETROS RECIBIDOS
  * ========================================================= */
-error_log("========== NUEVA PETICIÓN ==========");
-error_log("GET: " . json_encode($_GET));
-error_log("POST: " . json_encode($_POST));
-error_log("REMOTE_ADDR: " . ($_SERVER['REMOTE_ADDR'] ?? 'N/A'));
-error_log("HTTP_X_FORWARDED_FOR: " . ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? 'N/A'));
+debug_log("========== NUEVA PETICIÓN ==========");
+debug_log("📋 MÉTODO: " . $_SERVER['REQUEST_METHOD']);
+debug_log("🔗 URL COMPLETA: " . ($_SERVER['REQUEST_URI'] ?? 'N/A'));
+debug_log("📥 GET: " . json_encode($_GET));
+debug_log("📤 POST: " . json_encode($_POST));
+debug_log("🌐 REMOTE_ADDR: " . ($_SERVER['REMOTE_ADDR'] ?? 'N/A'));
+debug_log("🔀 HTTP_X_FORWARDED_FOR: " . ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? 'N/A'));
+debug_log("👤 HTTP_USER_AGENT: " . ($_SERVER['HTTP_USER_AGENT'] ?? 'N/A'));
+
+// Log todos los headers
+debug_log("📨 HEADERS COMPLETOS:");
+foreach ($_SERVER as $key => $value) {
+    if (strpos($key, 'HTTP_') === 0) {
+        debug_log("  $key: $value");
+    }
+}
 
 /* =========================================================
  * PARÁMETROS QUE MANDA OMADA AL PORTAL
- * (nombres comunes: clientMac, clientIp, apMac, ssidName, radioId,
- *  originUrl, target, targetPort)
  * ========================================================= */
 $client_mac_raw = $_GET['clientMac'] ?? $_POST['clientMac'] ?? $_GET['mac'] ?? $_POST['mac'] ?? '';
 $ap_mac_raw     = $_GET['ap'] ?? $_POST['ap'] ?? $_GET['apMac'] ?? $_POST['apMac'] ?? '';
-$ap_ip_raw      = $_GET['target'] ?? $_POST['target'] ?? $_GET['ip'] ?? $_POST['ip'] ?? AP_IP; // ojo: 'target' NO es AP IP, es Controller IP (en Omada)
+$ap_ip_raw      = $_GET['target'] ?? $_POST['target'] ?? $_GET['ip'] ?? $_POST['ip'] ?? AP_IP;
 $token          = $_GET['token'] ?? $_POST['token'] ?? '';
 $ssid           = $_GET['ssid'] ?? $_POST['ssid'] ?? '';
 $redirect_url   = $_GET['url'] ?? $_POST['url'] ?? $_GET['redirect'] ?? '';
 
 /* Omada controller params explícitos */
-$target         = $_GET['target']     ?? $_POST['target']     ?? '';       // Controller IP/host
-$targetPort     = $_GET['targetPort'] ?? $_POST['targetPort'] ?? '8088';   // 8088 http / 8043 https
+$target         = $_GET['target']     ?? $_POST['target']     ?? '';
+$targetPort     = $_GET['targetPort'] ?? $_POST['targetPort'] ?? '8088';
 $radioId        = $_GET['radioId']    ?? $_POST['radioId']    ?? '0';
 $ssidName       = $_GET['ssidName']   ?? $_POST['ssidName']   ?? ($ssid ?: '');
 $originUrl      = $_GET['originUrl']  ?? $_POST['originUrl']  ?? $redirect_url;
@@ -259,8 +337,24 @@ $clientIp_om    = $_GET['clientIp']   ?? $_POST['clientIp']   ?? ($_SERVER['REMO
 /* Normalizaciones */
 $mac_norm   = normalize_mac($client_mac_raw);
 $ap_norm    = normalize_mac($ap_mac_raw);
-$ap_ip      = only_ip_part($ap_ip_raw) ?: AP_IP; // solo para UI/debug
+$ap_ip      = only_ip_part($ap_ip_raw) ?: AP_IP;
 $client_ip  = $_SERVER['REMOTE_ADDR'] ?? '';
+
+debug_log("🎯 PARÁMETROS PROCESADOS:");
+debug_log("  - MAC Cliente Raw: '$client_mac_raw'");
+debug_log("  - MAC Cliente Norm: '$mac_norm'");
+debug_log("  - AP MAC Raw: '$ap_mac_raw'");
+debug_log("  - AP MAC Norm: '$ap_norm'");
+debug_log("  - AP IP (UI): '$ap_ip'");
+debug_log("  - Cliente IP (server): '$client_ip'");
+debug_log("  - Cliente IP (Omada): '$clientIp_om'");
+debug_log("  - Omada target: '$target'");
+debug_log("  - Omada targetPort: '$targetPort'");
+debug_log("  - SSID: '$ssid'");
+debug_log("  - SSID Name: '$ssidName'");
+debug_log("  - radioId: '$radioId'");
+debug_log("  - originUrl: '$originUrl'");
+debug_log("  - Token: '$token'");
 
 $errors = [
     'nombre'   => '',
@@ -271,18 +365,6 @@ $errors = [
     'terminos' => ''
 ];
 
-error_log("📋 PARÁMETROS PROCESADOS:");
-error_log("  - MAC Cliente: $mac_norm");
-error_log("  - AP MAC: $ap_norm");
-error_log("  - AP IP (UI): $ap_ip");
-error_log("  - Cliente IP (server): $client_ip");
-error_log("  - Omada target: $target");
-error_log("  - Omada targetPort: $targetPort");
-error_log("  - SSID/ssidName: " . ($ssidName ?: $ssid));
-error_log("  - radioId: $radioId");
-error_log("  - originUrl: $originUrl");
-error_log("  - Token: $token");
-
 /* =========================================================
  *  RESOLVER ZONA POR AP
  * ========================================================= */
@@ -292,6 +374,7 @@ $zona_banner = '';
 
 if ($ap_norm !== '') {
     try {
+        debug_log("🔍 Buscando zona por AP MAC: $ap_norm");
         $stmtZ = $conn->prepare("
             SELECT z.codigo, z.nombre, z.banner_url
             FROM wifi_zona_aps a
@@ -306,12 +389,16 @@ if ($ap_norm !== '') {
             $zona_codigo = $rowZ['codigo'];
             $zona_nombre = $rowZ['nombre'];
             $zona_banner = $rowZ['banner_url'];
-            error_log("✅ Zona detectada por AP_MAC: $ap_norm → {$zona_codigo}");
+            debug_log("✅ Zona detectada por AP_MAC: $ap_norm → {$zona_codigo} ({$zona_nombre})");
+        } else {
+            debug_log("⚠️ No se encontró zona para AP MAC: $ap_norm");
         }
         $stmtZ->close();
     } catch (Exception $e) {
-        error_log("⚠️ Error buscando zona por AP: " . $e->getMessage());
+        debug_log("❌ Error buscando zona por AP: " . $e->getMessage());
     }
+} else {
+    debug_log("⚠️ No hay AP MAC para buscar zona");
 }
 
 $_SESSION['wifi_zona_codigo'] = $zona_codigo;
@@ -326,6 +413,8 @@ $client_exists = false;
 
 if ($mac_norm !== '') {
     try {
+        debug_log("🔍 Verificando estado del cliente: $mac_norm");
+        
         // ¿ya autorizado en radcheck?
         $check_radcheck = $conn->prepare("
             SELECT id FROM radcheck 
@@ -342,7 +431,9 @@ if ($mac_norm !== '') {
 
         if ($has_rc) {
             $mac_status = 'registered';
-            error_log("✅ Cliente ya registrado en radcheck: $mac_norm");
+            debug_log("✅ Cliente ya registrado en radcheck: $mac_norm");
+        } else {
+            debug_log("⚠️ Cliente NO encontrado en radcheck: $mac_norm");
         }
 
         // ¿existe en clients?
@@ -352,18 +443,25 @@ if ($mac_norm !== '') {
         $client_exists = $check_clients->get_result()->num_rows > 0;
         $check_clients->close();
 
-        if ($client_exists) error_log("✅ Cliente encontrado en tabla clients: $mac_norm");
+        if ($client_exists) {
+            debug_log("✅ Cliente encontrado en tabla clients: $mac_norm");
+        } else {
+            debug_log("⚠️ Cliente NO encontrado en tabla clients: $mac_norm");
+        }
 
     } catch (Exception $e) {
-        error_log("⚠️ Error verificando estado: " . $e->getMessage());
+        debug_log("❌ Error verificando estado: " . $e->getMessage());
     }
 
     // Si ya está registrado, lanzar browserauth hacia Omada y redirigir
     if ($mac_status === 'registered') {
-        error_log("🔄 Cliente ya registrado → invocando browserauth hacia Omada");
+        debug_log("🔄 Cliente ya registrado → invocando browserauth hacia Omada");
 
         // Usamos MAC=usuario y MAC=clave (coherente con Cleartext-Password o dummy)
-        $u = $mac_norm; $p = $mac_norm;
+        $u = $mac_norm; 
+        $p = $mac_norm;
+
+        debug_log("🔐 Credenciales para browserauth - User: $u, Pass: $p");
 
         $ok = omada_radius_browserauth(
             $target, $targetPort, $u, $p, $mac_norm, ($clientIp_om ?: $client_ip),
@@ -372,20 +470,22 @@ if ($mac_norm !== '') {
 
         // (Opcional) CoA como empujón extra
         if (!$ok) {
-            error_log("⚠️ browserauth falló, intento CoA/fallback");
+            debug_log("⚠️ browserauth falló, intento CoA/fallback");
             tplink_authorize_client($mac_norm, $ap_norm, ($ssidName ?: $ssid), $token);
             trigger_coa_disconnect($mac_norm);
         }
 
         redirect_to_tyc($mac_norm, $client_ip);
     }
+} else {
+    debug_log("❌ No hay MAC para verificar estado");
 }
 
 /* =========================================================
  * MANEJO POST (registro)
  * ========================================================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
-    error_log("📝 Procesando formulario de registro");
+    debug_log("📝 Procesando formulario de registro POST");
 
     $nombre   = trim($_POST['nombre']   ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
@@ -393,6 +493,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
     $telefono = preg_replace('/\D+/', '', $_POST['telefono'] ?? '');
     $email    = trim($_POST['email']    ?? '');
     $terminos = isset($_POST['terminos']) ? 1 : 0;
+
+    debug_log("📋 Datos del formulario:");
+    debug_log("  Nombre: $nombre");
+    debug_log("  Apellido: $apellido");
+    debug_log("  Cédula: $cedula");
+    debug_log("  Teléfono: $telefono");
+    debug_log("  Email: $email");
+    debug_log("  Términos: $terminos");
 
     // Validaciones
     if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
@@ -403,11 +511,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
     if (!$terminos)                  $errors['terminos'] = 'Debes aceptar los términos.';
 
     $hayErrores = array_filter($errors, fn($e) => $e !== '');
+    debug_log("❌ Errores de validación: " . json_encode($errors));
 
     if (!$hayErrores && $mac_norm !== '') {
         try {
+            debug_log("🔄 Iniciando transacción de registro para: $mac_norm");
             $conn->begin_transaction();
-            error_log("🔄 Iniciando transacción de registro para: $mac_norm");
 
             // ¿ya existe en radcheck?
             $check = $conn->prepare("SELECT id FROM radcheck WHERE username = ? LIMIT 1");
@@ -415,6 +524,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             $check->execute();
             $existe_rc = $check->get_result()->num_rows > 0;
             $check->close();
+
+            debug_log("📊 Cliente en radcheck: " . ($existe_rc ? 'EXISTE' : 'NO EXISTE'));
 
             if (!$existe_rc) {
                 // Insert en clients
@@ -425,15 +536,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
                 $stmt_clients->bind_param("sssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm, $ap_norm);
                 $stmt_clients->execute();
                 $stmt_clients->close();
-                error_log("✅ Cliente insertado en tabla clients");
+                debug_log("✅ Cliente insertado en tabla clients");
 
-                // --- Estilo A: Auth-Type := Accept (sin password real)
-                // $stmt_rc = $conn->prepare("
-                //    INSERT INTO radcheck (username, attribute, op, value)
-                //    VALUES (?, 'Auth-Type', ':=', 'Accept')
-                // ");
-
-                // --- Estilo B: username = MAC, password = MAC (recomendado para browserauth)
+                // Insert en radcheck con Cleartext-Password
                 $stmt_rc = $conn->prepare("
                     INSERT INTO radcheck (username, attribute, op, value)
                     VALUES (?, 'Cleartext-Password', ':=', ?)
@@ -441,37 +546,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
                 $stmt_rc->bind_param("ss", $mac_norm, $mac_norm);
                 $stmt_rc->execute();
                 $stmt_rc->close();
-                error_log("✅ Cliente autorizado en radcheck");
+                debug_log("✅ Cliente autorizado en radcheck");
             } else {
-                error_log("⚠️ Cliente ya existía en radcheck");
+                debug_log("⚠️ Cliente ya existía en radcheck, solo actualizando clients");
+                
+                // Actualizar tabla clients si existe
+                $update_clients = $conn->prepare("
+                    UPDATE clients SET nombre=?, apellido=?, cedula=?, telefono=?, email=?, ap_mac=?
+                    WHERE mac=?
+                ");
+                $update_clients->bind_param("sssssss", $nombre, $apellido, $cedula, $telefono, $email, $ap_norm, $mac_norm);
+                $update_clients->execute();
+                $update_clients->close();
+                debug_log("✅ Cliente actualizado en tabla clients");
             }
 
             $conn->commit();
+            debug_log("✅ Transacción completada exitosamente");
 
             // 🔔 CLAVE: invocar browserauth (Omada → RADIUS)
-            $u = $mac_norm; $p = $mac_norm; // coherente con Cleartext-Password
+            $u = $mac_norm; 
+            $p = $mac_norm; // coherente con Cleartext-Password
+            
+            debug_log("🚀 Invocando browserauth después del registro");
+            debug_log("🔐 Credenciales: User=$u, Pass=$p");
+
             $ok = omada_radius_browserauth(
                 $target, $targetPort, $u, $p, $mac_norm, ($clientIp_om ?: $client_ip),
                 $ap_norm, ($ssidName ?: $ssid), $radioId, $originUrl
             );
 
             if (!$ok) {
-                error_log("⚠️ browserauth falló, intento fallback (AP notify + CoA)");
+                debug_log("⚠️ browserauth falló después del registro, intento fallback");
                 tplink_authorize_client($mac_norm, $ap_norm, ($ssidName ?: $ssid), $token);
                 sleep(1);
                 trigger_coa_disconnect($mac_norm);
+            } else {
+                debug_log("✅ browserauth exitoso después del registro");
             }
 
-            error_log("✅ Registro completado, redirigiendo a bienvenido");
+            debug_log("✅ Registro completado, redirigiendo a bienvenido");
             redirect_to_bienvenido($mac_norm, $client_ip);
 
         } catch (Exception $e) {
-            if ($conn->errno) $conn->rollback();
-            error_log("❌ Error en registro: " . $e->getMessage());
+            if ($conn->errno) {
+                $conn->rollback();
+                debug_log("❌ Error en transacción, rollback ejecutado");
+            }
+            debug_log("❌ Error en registro: " . $e->getMessage());
+            debug_log("❌ Error code: " . $conn->errno);
 
             if ($conn->errno == 1062) {
                 // Duplicado (ya existía) → igual intentamos browserauth
-                error_log("⚠️ Duplicado detectado, intentar browserauth + redirigir");
+                debug_log("⚠️ Duplicado detectado (errno 1062), intentar browserauth + redirigir");
                 $u = $mac_norm; $p = $mac_norm;
                 omada_radius_browserauth(
                     $target, $targetPort, $u, $p, $mac_norm, ($clientIp_om ?: $client_ip),
@@ -484,9 +611,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             }
         }
     } else {
-        if ($mac_norm === '') error_log("❌ No se puede registrar: MAC vacía");
-        error_log("❌ Errores de validación: " . json_encode($errors));
+        if ($mac_norm === '') debug_log("❌ No se puede registrar: MAC vacía");
+        debug_log("❌ Errores de validación impiden el registro");
     }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    debug_log("📝 POST recibido pero sin datos de formulario");
+    debug_log("📤 POST data: " . json_encode($_POST));
 }
 
 /* =========================================================
@@ -595,7 +725,11 @@ function validarEmailReal(string $email): bool {
         .debug-info {
             background: #f5f5f5; padding: 12px; border-radius: 10px; margin: 15px 0;
             font-size: 0.85rem; color: #666; font-family: monospace;
-            max-height: 240px; overflow-y: auto;
+            max-height: 300px; overflow-y: auto; border: 2px dashed #ccc;
+        }
+        .debug-section {
+            background: #fff; padding: 10px; margin: 8px 0; border-radius: 8px;
+            border-left: 4px solid #667eea;
         }
         .required::after { content: " *"; color: #e74c3c; }
         .terminos-container {
@@ -612,6 +746,11 @@ function validarEmailReal(string $email): bool {
             font-size:0.8rem; display:inline-block; margin-bottom:15px; width:100%;
             text-align:center;
         }
+        .log-display {
+            background: #2c3e50; color: #ecf0f1; padding: 12px; border-radius: 10px;
+            margin: 15px 0; font-family: monospace; font-size: 0.8rem;
+            max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+        }
         @media (max-width: 480px) {
             .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; }
             input, button { font-size: 1rem; }
@@ -625,44 +764,87 @@ function validarEmailReal(string $email): bool {
     <img src="gonetlogo.png" alt="GoNet Logo" class="top-image" onerror="this.style.display='none'">
 
     <div class="form-container">
-        <h2>🌐 Registro Wi-Fi</h2>
+        <h2>🌐 Registro Wi-Fi - DEBUG</h2>
 
-        <?php if ($zona_codigo !== ''): ?>
-            <div class="zona-badge">
-                📍 Zona: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong><br>
-                🔷 AP (UI): <strong><?php echo htmlspecialchars(AP_IP); ?></strong>
-            </div>
-        <?php endif; ?>
-
-        <!-- DEBUG INFO -->
+        <!-- DEBUG INFO EXTENDIDA -->
         <div class="debug-info">
-            <strong>🔍 Debug Info:</strong><br>
-            Controller target: <?php echo htmlspecialchars($target ?: 'No enviado'); ?><br>
-            Controller targetPort: <?php echo htmlspecialchars($targetPort ?: 'No enviado'); ?><br>
-            AP IP (UI): <?php echo htmlspecialchars($ap_ip ?: ''); ?><br>
-            Cliente MAC: <?php echo htmlspecialchars($mac_norm ?: 'No detectada'); ?><br>
-            AP MAC: <?php echo htmlspecialchars($ap_norm ?: 'No detectada'); ?><br>
-            Cliente IP (Omada): <?php echo htmlspecialchars($clientIp_om ?: 'No enviado'); ?><br>
-            SSID: <?php echo htmlspecialchars(($ssidName ?: $ssid) ?: 'No enviado'); ?><br>
-            radioId: <?php echo htmlspecialchars($radioId); ?><br>
-            originUrl: <?php echo htmlspecialchars($originUrl ?: 'No enviado'); ?><br>
-            Token: <?php echo htmlspecialchars($token ?: 'No enviado'); ?>
+            <strong>🔍 DEBUG INFO COMPLETA:</strong>
+            
+            <div class="debug-section">
+                <strong>🎯 PARÁMETROS OMADA:</strong><br>
+                Controller target: <?php echo htmlspecialchars($target ?: 'NO ENVIADO'); ?><br>
+                Controller targetPort: <?php echo htmlspecialchars($targetPort ?: 'NO ENVIADO'); ?><br>
+                Cliente MAC: <?php echo htmlspecialchars($mac_norm ?: 'NO DETECTADA'); ?><br>
+                AP MAC: <?php echo htmlspecialchars($ap_norm ?: 'NO DETECTADA'); ?><br>
+                Cliente IP (Omada): <?php echo htmlspecialchars($clientIp_om ?: 'NO ENVIADO'); ?><br>
+                SSID: <?php echo htmlspecialchars(($ssidName ?: $ssid) ?: 'NO ENVIADO'); ?><br>
+                radioId: <?php echo htmlspecialchars($radioId); ?><br>
+                originUrl: <?php echo htmlspecialchars($originUrl ?: 'NO ENVIADO'); ?>
+            </div>
+
+            <div class="debug-section">
+                <strong>📊 ESTADO CLIENTE:</strong><br>
+                MAC Status: <?php echo htmlspecialchars($mac_status); ?><br>
+                Existe en clients: <?php echo $client_exists ? 'SÍ' : 'NO'; ?><br>
+                Existe en radcheck: <?php echo isset($existe_rc) ? ($existe_rc ? 'SÍ' : 'NO') : 'NO VERIFICADO'; ?>
+            </div>
+
+            <div class="debug-section">
+                <strong>🌐 CONEXIÓN:</strong><br>
+                AP IP (UI): <?php echo htmlspecialchars($ap_ip ?: ''); ?><br>
+                Cliente IP (Server): <?php echo htmlspecialchars($client_ip); ?><br>
+                Zona: <?php echo htmlspecialchars($zona_nombre ?: 'NO DETECTADA'); ?>
+            </div>
+
+            <div class="debug-section">
+                <strong>🔗 URLs CONSTRUIDAS:</strong><br>
+                <?php if ($target && $targetPort): ?>
+                    <?php $scheme = ($targetPort == '8043') ? "https" : "http"; ?>
+                    BrowserAuth URL: <?php echo htmlspecialchars("{$scheme}://{$target}:{$targetPort}/portal/radius/browserauth"); ?>
+                <?php else: ?>
+                    BrowserAuth URL: NO CONFIGURADA (falta target/targetPort)
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- ÚLTIMOS LOGS -->
+        <div class="log-display">
+            <strong>📝 ÚLTIMOS LOGS:</strong><br>
+            <?php 
+            $last_logs = `tail -20 /tmp/portal_debug.log`;
+            echo htmlspecialchars($last_logs);
+            ?>
         </div>
 
         <?php if ($mac_norm === ''): ?>
             <div class="error">
-                ❌ No se detectó tu dirección MAC.<br>
-                <small>Asegúrate de estar conectado a la red Wi-Fi.<br>
-                Parámetros recibidos: <?php echo htmlspecialchars(json_encode($_GET)); ?></small>
+                ❌ ERROR CRÍTICO: No se detectó tu dirección MAC.<br>
+                <small>Esto significa que el Omada Controller no está enviando los parámetros correctos al portal.</small>
             </div>
+            
+            <div class="debug-info">
+                <strong>🚨 SOLUCIÓN:</strong><br>
+                1. Verifica que el portal esté bien configurado en el Omada Controller<br>
+                2. Revisa que el cliente venga del SSID correcto<br>
+                3. Verifica los logs del Omada Controller<br>
+                4. Parámetros GET recibidos: <?php echo htmlspecialchars(json_encode($_GET)); ?>
+            </div>
+            
         <?php elseif ($mac_status === 'registered'): ?>
             <div class="status-info">
                 ✅ Este dispositivo ya está registrado.<br>
-                Redirigiendo...
+                Redirigiendo a Términos y Condiciones...
             </div>
+            <script>
+                setTimeout(() => {
+                    window.location.href = 'tyc.php';
+                }, 2000);
+            </script>
+            
         <?php elseif ($client_exists): ?>
             <div class="warning-info">
-                ⚠️ Dispositivo conocido. Completa el registro.
+                ⚠️ Dispositivo conocido pero no autorizado.<br>
+                Completa el registro para activar el acceso.
             </div>
         <?php else: ?>
             <div class="info-display">
@@ -713,15 +895,32 @@ function validarEmailReal(string $email): bool {
                 <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['terminos']); ?></div><?php endif; ?>
             </div>
 
-            <!-- Campos ocultos -->
+            <!-- Campos ocultos con todos los parámetros -->
             <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
             <input type="hidden" name="ip" value="<?php echo htmlspecialchars($client_ip); ?>">
             <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
             <input type="hidden" name="ap_ip" value="<?php echo htmlspecialchars($ap_ip); ?>">
             <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
             <input type="hidden" name="ssid" value="<?php echo htmlspecialchars($ssidName ?: $ssid); ?>">
+            <input type="hidden" name="target" value="<?php echo htmlspecialchars($target); ?>">
+            <input type="hidden" name="targetPort" value="<?php echo htmlspecialchars($targetPort); ?>">
+            <input type="hidden" name="radioId" value="<?php echo htmlspecialchars($radioId); ?>">
+            <input type="hidden" name="originUrl" value="<?php echo htmlspecialchars($originUrl); ?>">
+            <input type="hidden" name="clientIp" value="<?php echo htmlspecialchars($clientIp_om); ?>">
 
             <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
+            
+            <div class="debug-info" style="margin-top: 15px; font-size: 0.75rem;">
+                <strong>🔧 DEBUG POST:</strong><br>
+                Al enviar, se ejecutará browserauth a:<br>
+                <?php if ($target && $targetPort): ?>
+                    <?php $scheme = ($targetPort == '8043') ? "https" : "http"; ?>
+                    <strong><?php echo htmlspecialchars("{$scheme}://{$target}:{$targetPort}/portal/radius/browserauth"); ?></strong><br>
+                    Con credenciales: usuario=<?php echo htmlspecialchars($mac_norm); ?>, password=<?php echo htmlspecialchars($mac_norm); ?>
+                <?php else: ?>
+                    <strong style="color: red;">ERROR: No hay target/targetPort para browserauth</strong>
+                <?php endif; ?>
+            </div>
         </form>
         <?php endif; ?>
     </div>
@@ -734,122 +933,27 @@ function validarEmailReal(string $email): bool {
     <?php endif; ?>
 
     <script>
+        // Debug en consola del navegador
+        console.log("🔍 DEBUG CLIENTE:");
+        console.log("MAC: <?php echo $mac_norm; ?>");
+        console.log("Target: <?php echo $target; ?>");
+        console.log("TargetPort: <?php echo $targetPort; ?>");
+        console.log("URL BrowserAuth: <?php echo $target && $targetPort ? $scheme.'://'.$target.':'.$targetPort.'/portal/radius/browserauth' : 'NO CONFIGURADA'; ?>");
+
         const form = document.getElementById('registrationForm');
         if (form) {
-            const fields = {
-                nombre:   form.querySelector('[name="nombre"]'),
-                apellido: form.querySelector('[name="apellido"]'),
-                cedula:   form.querySelector('[name="cedula"]'),
-                telefono: form.querySelector('[name="telefono"]'),
-                email:    form.querySelector('[name="email"]'),
-                terminos: form.querySelector('[name="terminos"]'),
-            };
-
-            function validarCedulaEC(ced) {
-                ced = ced.replace(/\D+/g,'');
-                if (!/^\d{10}$/.test(ced)) return false;
-                const prov = parseInt(ced.slice(0,2),10);
-                if (prov < 1 || prov > 24) return false;
-                const t = parseInt(ced[2],10);
-                if (t >= 6) return false;
-                const coef = [2,1,2,1,2,1,2,1,2];
-                let suma = 0;
-                for (let i=0;i<9;i++){
-                    let prod = parseInt(ced[i],10) * coef[i];
-                    if (prod >= 10) prod -= 9;
-                    suma += prod;
-                }
-                const dv = (10 - (suma % 10)) % 10;
-                return dv === parseInt(ced[9],10);
-            }
-
-            function validarTelefonoEC(tel) {
-                tel = tel.replace(/\D+/g,'');
-                return /^09\d{8}$/.test(tel);
-            }
-
-            function validarEmailBasico(mail) {
-                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail);
-            }
-
-            function setError(input, msg) {
-                let errDiv = input.parentElement.querySelector('.field-error');
-                if (msg) {
-                    if (!errDiv) {
-                        errDiv = document.createElement('div');
-                        errDiv.className = 'field-error';
-                        input.parentElement.appendChild(errDiv);
-                    }
-                    errDiv.textContent = msg;
-                    input.setAttribute('aria-invalid', 'true');
-                } else {
-                    if (errDiv) errDiv.textContent = '';
-                    input.removeAttribute('aria-invalid');
-                }
-            }
-
-            function validateAll() {
-                let hasErrors = false;
-
-                if (!fields.nombre.value.trim()) {
-                    setError(fields.nombre, 'Ingresa tu nombre.');
-                    hasErrors = true;
-                } else setError(fields.nombre, '');
-
-                if (!fields.apellido.value.trim()) {
-                    setError(fields.apellido, 'Ingresa tu apellido.');
-                    hasErrors = true;
-                } else setError(fields.apellido, '');
-
-                const ced = fields.cedula.value;
-                if (!validarCedulaEC(ced)) {
-                    setError(fields.cedula, 'Cédula inválida.');
-                    hasErrors = true;
-                } else setError(fields.cedula, '');
-
-                const tel = fields.telefono.value;
-                if (!validarTelefonoEC(tel)) {
-                    setError(fields.telefono, 'Teléfono inválido.');
-                    hasErrors = true;
-                } else setError(fields.telefono, '');
-
-                const mail = fields.email.value;
-                if (!validarEmailBasico(mail)) {
-                    setError(fields.email, 'Correo inválido.');
-                    hasErrors = true;
-                } else setError(fields.email, '');
-
-                if (!fields.terminos.checked) {
-                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
-                    if (!errDiv) {
-                        errDiv = document.createElement('div');
-                        errDiv.className = 'field-error';
-                        fields.terminos.closest('.terminos-container').appendChild(errDiv);
-                    }
-                    errDiv.textContent = 'Debes aceptar los términos.';
-                    hasErrors = true;
-                } else {
-                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
-                    if (errDiv) errDiv.textContent = '';
-                }
-
-                return !hasErrors;
-            }
-
             form.addEventListener('submit', function(e) {
-                if (!validateAll()) {
-                    e.preventDefault();
-                    return false;
-                }
                 const submitBtn = document.getElementById('submitBtn');
                 if (submitBtn) {
                     submitBtn.innerHTML = '⏳ Procesando...';
                     submitBtn.disabled = true;
                 }
-            });
-
-            ['input','change','blur'].forEach(evt => {
-                form.addEventListener(evt, () => validateAll(), true);
+                
+                // Debug antes de enviar
+                console.log("📤 Enviando formulario...");
+                console.log("🔐 Credenciales para browserauth:");
+                console.log("  Usuario: <?php echo $mac_norm; ?>");
+                console.log("  Password: <?php echo $mac_norm; ?>");
             });
         }
     </script>
