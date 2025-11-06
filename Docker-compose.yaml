@@ -22,6 +22,7 @@ services:
       - backend
 
   freeradius:
+    #build: ./FreeRadius
     image: 2stacks/freeradius:latest
     container_name: freeradiustp
     environment:
@@ -30,7 +31,7 @@ services:
       DB_USER: radius
       DB_PASS: radpass         
       RAD_DEBUG: "yes"
-      RAD_CLIENTS: 192.168.0.7
+      RAD_CLIENTS: 192.168.0.7 192.168.0.3
       RADIUS_KEY: telecom 
     volumes:
       - ./FreeRadius/scripts:/docker-entrypoint-initdb.d:ro 
@@ -42,7 +43,7 @@ services:
        - "1813:1813/udp"
        - "3799:3799/udp"
 
-    restart: always
+    
     networks:
       - backend
 
