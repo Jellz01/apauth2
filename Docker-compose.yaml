@@ -1,3 +1,4 @@
+
 services:
   mysql:
     image: mysql:8.0.42
@@ -17,72 +18,53 @@ services:
       timeout: 3s
       retries: 30
     restart: always
-    networks: [backend]
+    networks:
+      - backend
 
   freeradius:
+    #build: ./FreeRadius
     image: 2stacks/freeradius:latest
     container_name: freeradiustp
     environment:
       DB_HOST: mysql
       DB_NAME: radius
       DB_USER: radius
-      DB_PASS: radpass
+      DB_PASS: radpass         
       RAD_DEBUG: "yes"
-      RAD_CLIENTS: "192.168.0.0/24"   # allow EAPs/controller on your LAN
-      RADIUS_KEY: telecom
+      RAD_CLIENTS: 192.168.0.3
+      RADIUS_KEY: telecom 
     volumes:
-      - ./FreeRadius/scripts:/docker-entrypoint-initdb.d:ro
+      - ./FreeRadius/scripts:/docker-entrypoint-initdb.d:ro 
+     # - ./FreeRadius/etc/raddb/clients.conf:/etc/freeradius/3.0/clients.conf:ro
+      
+    
     ports:
-      - "1812:1812/udp"
-      - "1813:1813/udp"
-      - "3799:3799/udp"
-    depends_on:
-      mysql:
-        condition: service_healthy
-    restart: unless-stopped
-    networks: [backend]
+       - "1812:1812/udp"
+       - "1813:1813/udp"
+       - "3799:3799/udp"
+
+    
+    networks:
+      - backend
 
   php:
     build: ./web/tplink
     container_name: php_webtp
-    environment:
-      MYSQL_HOST: mysql
-      MYSQL_USER: radius
-      MYSQL_PASSWORD: radpass
-      MYSQL_DATABASE: radius
+    restart: always
+    depends_on:
+      - mysql
     ports:
       - "8080:80"
     volumes:
       - ./web/tplink:/var/www/html
       - ./web/tplink/php-upload.ini:/usr/local/etc/php/conf.d/php-upload.ini
-    depends_on:
-      - mysql
-    restart: always
-    networks: [backend]
-
-  omada:
-    image: mbentley/omada-controller:latest
-    container_name: omada
     environment:
-      - TZ=America/Guayaquil        # set your timezone
-    volumes:
-      - ./omada/data:/opt/tplink/EAPController/data
-      - ./omada/work:/opt/tplink/EAPController/work
-      - ./omada/logs:/opt/tplink/EAPController/logs
-    ports:
-      - "8043:8043"        # HTTPS UI
-      - "8088:8088"        # HTTP UI
-      - "27001:27001/udp"  # discovery
-      - "27002:27002"
-      - "29810:29810/udp"
-      - "29811:29811"
-      - "29812:29812"
-      - "29813:29813"
-      - "29814:29814"
-      - "29815:29815"
-      - "29816:29816"
-    restart: unless-stopped
-    networks: [backend]
+      MYSQL_HOST: mysql
+      MYSQL_USER: radius
+      MYSQL_PASSWORD: radpass  
+      MYSQL_DATABASE: radius
+    networks:
+      - backend
 
 networks:
   backend: {}

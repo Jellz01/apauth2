@@ -173,3 +173,7 @@
 11-06-2025 10:07:48.035 INFO [check-ca-certificate-update-work-group-0] [] c.t.s.o.m.c.f(): Checking Last Ca Certification...
 11-06-2025 10:07:48.039 INFO [comm-pool-8] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
 11-06-2025 10:08:46.038 INFO [check-update-work-group-0] [] c.t.s.o.m.c.r(): Start sync Cloud Users OmadacId(ac43648f87e429fc31ad4194980333c0).
+11-06-2025 10:12:48.035 INFO [comm-pool-10] [] c.t.s.o.m.d.a.u.f.d(): Target firmware check task run
+11-06-2025 10:12:48.037 INFO [comm-pool-10] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
+11-06-2025 10:17:48.035 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): Target firmware check task run
+11-06-2025 10:17:48.037 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
