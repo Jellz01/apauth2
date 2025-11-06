@@ -10,6 +10,11 @@ $user = "radius";
 $pass = "radpass";
 $db   = "radius";
 
+// TP-Link AP Configuration
+define('AP_IP', '192.168.0.7');
+define('RADIUS_SECRET', 'telecom');
+define('COA_PORT', '3799');
+
 /* =========================================================
  * HELPER: normalizar MAC (quitar :, -, ., espacios)
  * ========================================================= */
@@ -24,7 +29,6 @@ function normalize_mac($mac_raw) {
  * ========================================================= */
 function only_ip_part($str) {
     if (!$str) return '';
-    // si viene con puerto -> separar
     if (strpos($str, ':') !== false) {
         $parts = explode(':', $str);
         return $parts[0];
@@ -85,73 +89,89 @@ function redirect_to_tyc($mac_norm, $ip) {
 }
 
 /* =========================================================
- * HELPER: lanzar CoA en background
+ * HELPER: lanzar CoA (Change of Authorization) 
+ * Esto fuerza al AP a re-autenticar al cliente
  * ========================================================= */
-function start_coa_async($mac, $ap_ip) {
-    if (empty($mac) || empty($ap_ip)) {
-        error_log("❌ start_coa_async: mac o ap_ip vacíos");
+function trigger_coa_disconnect($mac) {
+    if (empty($mac)) {
+        error_log("❌ trigger_coa_disconnect: MAC vacía");
         return false;
     }
 
-    // ojo: si llegó con puerto ya lo limpiamos antes de llamarlo
-    $coa_secret = "telecom";
-    $coa_port   = "4325";
+    $ap_ip = AP_IP;
+    $secret = RADIUS_SECRET;
+    $port = COA_PORT;
 
-    $payload = sprintf('User-Name=%s', addslashes($mac));
+    // Comando para desconectar (forzar re-autenticación)
     $cmd = sprintf(
-        'sh -c \'echo "%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s >> /tmp/coa_async.log 2>&1 &\'',
-        $payload,
+        'echo "User-Name=%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s >> /tmp/coa.log 2>&1 &',
+        escapeshellarg($mac),
         escapeshellarg($ap_ip),
-        $coa_port,
-        escapeshellarg($coa_secret)
+        escapeshellarg($port),
+        escapeshellarg($secret)
     );
 
-    error_log("🚀 Lanzando CoA en background: $cmd");
+    error_log("🚀 Lanzando CoA: $cmd");
     @exec($cmd);
+    
     return true;
 }
 
 /* =========================================================
- * HELPER: avisar al controlador TP-Link / Omada
- * (ajusta la URL a tu controlador)
+ * TP-Link External Portal Authentication
+ * Este método notifica al AP que el usuario está autorizado
  * ========================================================= */
-function omada_allow_client($controller_base, $token, $clientMac, $apMac, $ssid) {
-    // si no hay token ni base no hacemos nada
-    if (!$controller_base || !$clientMac) {
-        error_log("⚠️ omada_allow_client: faltan datos (controller_base o clientMac)");
-        return;
-    }
-
-    // endpoint típico de Omada ext portal (AJUSTA si tu versión usa otro)
-    // muchos usan: /extportal/auth, /portal/extPortal/auth o /api/v2/hotspot/extPortal/auth
-    $url = rtrim($controller_base, "/") . "/portal/extPortal/auth";
-
-    $payload = [
-        "success"   => true,
-        "clientMac" => $clientMac,
-        "apMac"     => $apMac,
-        "ssid"      => $ssid,
-        "token"     => $token,
-        "authType"  => "radius",
+function tplink_authorize_client($clientMac, $apMac = '', $ssid = '', $token = '') {
+    $ap_ip = AP_IP;
+    
+    // Para TP-Link standalone AP (no Omada controller)
+    // El AP típicamente expone una página de autorización
+    
+    // Intentar múltiples endpoints comunes de TP-Link
+    $endpoints = [
+        "http://{$ap_ip}/portal_auth.cgi",
+        "http://{$ap_ip}/cgi-bin/portal_auth",
+        "http://{$ap_ip}/login",
     ];
 
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS     => json_encode($payload),
-        CURLOPT_TIMEOUT        => 3,
-    ]);
-    $resp = curl_exec($ch);
-    $err  = curl_error($ch);
-    curl_close($ch);
+    $payload = [
+        'clientMac' => $clientMac,
+        'success' => 'true',
+        'authType' => 'radius',
+    ];
 
-    if ($err) {
-        error_log("❌ omada_allow_client CURL error: $err");
-    } else {
-        error_log("✅ omada_allow_client enviado a $url → $resp");
+    if ($apMac) $payload['apMac'] = $apMac;
+    if ($ssid) $payload['ssid'] = $ssid;
+    if ($token) $payload['token'] = $token;
+
+    error_log("🔐 Intentando autorizar cliente: " . json_encode($payload));
+
+    foreach ($endpoints as $url) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_TIMEOUT => 3,
+            CURLOPT_CONNECTTIMEOUT => 2,
+        ]);
+        
+        $resp = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        error_log("🔍 Endpoint: $url → HTTP $http_code → Resp: $resp");
+        
+        if ($http_code >= 200 && $http_code < 300) {
+            error_log("✅ Cliente autorizado en: $url");
+            return true;
+        }
     }
+    
+    error_log("⚠️ No se pudo notificar al AP directamente, usando CoA");
+    return false;
 }
 
 /* =========================================================
@@ -207,37 +227,28 @@ try {
 }
 
 /* =========================================================
- * PARÁMETROS QUE MANDA TP-LINK / OMADA
- * =========================================================
- * target    -> 192.168.0.9:22080
- * clientMac -> MAC del cliente
- * ap        -> MAC del AP
- * ssid      -> SSID
- * token     -> token de sesión del portal (a veces)
- */
-$client_mac_raw = $_GET['clientMac'] ?? $_POST['clientMac'] ?? '';
-$ap_mac_raw_tpl = $_GET['ap']        ?? $_POST['ap']        ?? '';
-$ap_ip_tpl      = $_GET['target']    ?? $_POST['target']    ?? '';
-$token_omada    = $_GET['token']     ?? $_POST['token']     ?? '';
-$essid          = $_GET['ssid']      ?? $_POST['ssid']      ?? '';
+ * LOG TODOS LOS PARÁMETROS RECIBIDOS
+ * ========================================================= */
+error_log("========== NUEVA PETICIÓN ==========");
+error_log("GET: " . json_encode($_GET));
+error_log("POST: " . json_encode($_POST));
+error_log("REMOTE_ADDR: " . ($_SERVER['REMOTE_ADDR'] ?? 'N/A'));
+error_log("HTTP_X_FORWARDED_FOR: " . ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? 'N/A'));
 
-/* compat con tus nombres viejos */
-$mac_raw_fallback  = $_GET['mac']    ?? $_POST['mac']    ?? '';
-$ap_raw_fallback   = $_GET['ap_mac'] ?? $_POST['ap_mac'] ?? '';
-$ip_raw_fallback   = $_GET['ip']     ?? $_POST['ip']     ?? '';
+/* =========================================================
+ * PARÁMETROS QUE MANDA TP-LINK
+ * ========================================================= */
+$client_mac_raw = $_GET['clientMac'] ?? $_POST['clientMac'] ?? $_GET['mac'] ?? $_POST['mac'] ?? '';
+$ap_mac_raw = $_GET['ap'] ?? $_POST['ap'] ?? $_GET['apMac'] ?? $_POST['apMac'] ?? '';
+$ap_ip_raw = $_GET['target'] ?? $_POST['target'] ?? $_GET['ip'] ?? $_POST['ip'] ?? AP_IP;
+$token = $_GET['token'] ?? $_POST['token'] ?? '';
+$ssid = $_GET['ssid'] ?? $_POST['ssid'] ?? '';
+$redirect_url = $_GET['url'] ?? $_POST['url'] ?? $_GET['redirect'] ?? '';
 
-/* elegir finales */
-$mac_raw = $client_mac_raw !== '' ? $client_mac_raw : $mac_raw_fallback;
-$ap_raw  = $ap_mac_raw_tpl !== '' ? $ap_mac_raw_tpl : $ap_raw_fallback;
-
-$ap_ip_default = '192.168.0.9'; // por si no manda nada
-$ap_ip_input   = $ap_ip_tpl !== '' ? $ap_ip_tpl : ($_GET['ap_ip'] ?? $_POST['ap_ip'] ?? $ip_raw_fallback ?? '');
-$ap_ip_clean   = only_ip_part($ap_ip_input);
-$ap_ip         = $ap_ip_clean !== '' ? $ap_ip_clean : $ap_ip_default;
-
-$mac_norm = normalize_mac($mac_raw);
-$ap_norm  = normalize_mac($ap_raw);
-$ip       = trim($ip_raw_fallback);
+$mac_norm = normalize_mac($client_mac_raw);
+$ap_norm = normalize_mac($ap_mac_raw);
+$ap_ip = only_ip_part($ap_ip_raw) ?: AP_IP;
+$client_ip = $_SERVER['REMOTE_ADDR'] ?? '';
 
 $errors = [
     'nombre'   => '',
@@ -248,8 +259,14 @@ $errors = [
     'terminos' => ''
 ];
 
-error_log("🔍 TP-LINK PARAMS → clientMac='{$client_mac_raw}', ap='{$ap_mac_raw_tpl}', target='{$ap_ip_tpl}', token='{$token_omada}', ssid='{$essid}'");
-error_log("🔍 PARÁMETROS FINALES - MAC_CLIENTE: '$mac_norm', AP_MAC: '$ap_norm', AP_IP: '$ap_ip'");
+error_log("📋 PARÁMETROS PROCESADOS:");
+error_log("  - MAC Cliente: $mac_norm");
+error_log("  - AP MAC: $ap_norm");
+error_log("  - AP IP: $ap_ip");
+error_log("  - Cliente IP: $client_ip");
+error_log("  - Token: $token");
+error_log("  - SSID: $ssid");
+error_log("  - Redirect URL: $redirect_url");
 
 /* =========================================================
  *  RESOLVER ZONA POR AP
@@ -258,7 +275,6 @@ $zona_codigo = '';
 $zona_nombre = '';
 $zona_banner = '';
 
-// 1) directa por AP
 if ($ap_norm !== '') {
     try {
         $stmtZ = $conn->prepare("
@@ -283,56 +299,69 @@ if ($ap_norm !== '') {
     }
 }
 
-// 2) fallback por cliente
-if ($zona_codigo === '' && $mac_norm !== '') {
-    try {
-        $stmtC = $conn->prepare("
-            SELECT c.ap_mac
-            FROM clients c
-            WHERE c.mac = ?
-            ORDER BY c.id DESC
-            LIMIT 1
-        ");
-        $stmtC->bind_param("s", $mac_norm);
-        $stmtC->execute();
-        $resC = $stmtC->get_result();
-        if ($rowC = $resC->fetch_assoc()) {
-            $ap_from_client = normalize_mac($rowC['ap_mac']);
-            if ($ap_from_client !== '') {
-                $stmtZ2 = $conn->prepare("
-                    SELECT z.codigo, z.nombre, z.banner_url
-                    FROM wifi_zona_aps a
-                    JOIN wifi_zonas z ON a.zona_codigo = z.codigo
-                    WHERE a.ap_mac = ?
-                    LIMIT 1
-                ");
-                $stmtZ2->bind_param("s", $ap_from_client);
-                $stmtZ2->execute();
-                $resZ2 = $stmtZ2->get_result();
-                if ($rowZ2 = $resZ2->fetch_assoc()) {
-                    $zona_codigo = $rowZ2['codigo'];
-                    $zona_nombre = $rowZ2['nombre'];
-                    $zona_banner = $rowZ2['banner_url'];
-                    error_log("✅ Zona detectada por MAC cliente: $mac_norm → {$zona_codigo}");
-                }
-                $stmtZ2->close();
-            }
-        }
-        $stmtC->close();
-    } catch (Exception $e) {
-        error_log("⚠️ Error deduciendo zona por cliente: " . $e->getMessage());
-    }
-}
-
-/* guardar en sesión la zona detectada */
 $_SESSION['wifi_zona_codigo'] = $zona_codigo;
 $_SESSION['wifi_zona_nombre'] = $zona_nombre;
 $_SESSION['wifi_zona_banner'] = $zona_banner;
 
 /* =========================================================
+ * VERIFICAR ESTADO ACTUAL DEL CLIENTE
+ * ========================================================= */
+$mac_status = 'new';
+$client_exists = false;
+
+if ($mac_norm !== '') {
+    try {
+        // Verificar si ya está en radcheck (ya autorizado)
+        $check_radcheck = $conn->prepare("
+            SELECT id FROM radcheck 
+            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
+        ");
+        $check_radcheck->bind_param("s", $mac_norm);
+        $check_radcheck->execute();
+        $check_radcheck->store_result();
+
+        if ($check_radcheck->num_rows > 0) {
+            $mac_status = 'registered';
+            error_log("✅ Cliente ya registrado en radcheck: $mac_norm");
+        }
+        $check_radcheck->close();
+
+        // Verificar si existe en clients
+        $check_clients = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
+        $check_clients->bind_param("s", $mac_norm);
+        $check_clients->execute();
+        $check_clients->store_result();
+
+        if ($check_clients->num_rows > 0) {
+            $client_exists = true;
+            error_log("✅ Cliente encontrado en tabla clients: $mac_norm");
+        }
+        $check_clients->close();
+
+    } catch (Exception $e) {
+        error_log("⚠️ Error verificando estado: " . $e->getMessage());
+    }
+
+    // Si ya está registrado, notificar al AP y redirigir
+    if ($mac_status === 'registered') {
+        error_log("🔄 Cliente ya registrado, notificando al AP y redirigiendo");
+        
+        // Intentar notificar al AP
+        tplink_authorize_client($mac_norm, $ap_norm, $ssid, $token);
+        
+        // Forzar re-autenticación con CoA
+        trigger_coa_disconnect($mac_norm);
+        
+        redirect_to_tyc($mac_norm, $client_ip);
+    }
+}
+
+/* =========================================================
  * MANEJO POST (registro)
  * ========================================================= */
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
+    error_log("📝 Procesando formulario de registro");
+    
     $nombre   = trim($_POST['nombre']   ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
     $cedula   = preg_replace('/\D+/', '', $_POST['cedula'] ?? '');
@@ -340,16 +369,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim($_POST['email']    ?? '');
     $terminos = isset($_POST['terminos']) ? 1 : 0;
 
-    $mac_post    = $_POST['mac']    ?? '';
-    $ip_post     = $_POST['ip']     ?? '';
-    $ap_post_raw = $_POST['ap_mac'] ?? $ap_raw;
-    $ap_ip_post  = $_POST['ap_ip']  ?? $ap_ip;
-
-    $mac_norm   = normalize_mac($mac_post);
-    $ap_norm    = normalize_mac($ap_post_raw);
-    $ip         = trim($ip_post);
-    $ap_ip      = only_ip_part($ap_ip_post) ?: $ap_ip;
-
+    // Validaciones
     if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
     if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
     if (!validarCedulaEC($cedula)) {
@@ -367,135 +387,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $hayErrores = array_filter($errors, fn($e) => $e !== '');
 
-    if (!$hayErrores) {
+    if (!$hayErrores && $mac_norm !== '') {
         try {
             $conn->begin_transaction();
+            error_log("🔄 Iniciando transacción de registro para: $mac_norm");
 
-            // 1) ya existe en radcheck?
-            $check_radcheck = $conn->prepare("
-                SELECT id FROM radcheck 
-                WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
-            ");
-            $check_radcheck->bind_param("s", $mac_norm);
-            $check_radcheck->execute();
-            $check_radcheck->store_result();
+            // Verificar si ya existe
+            $check = $conn->prepare("SELECT id FROM radcheck WHERE username = ?");
+            $check->bind_param("s", $mac_norm);
+            $check->execute();
+            $check->store_result();
 
-            if ($check_radcheck->num_rows > 0) {
-                $check_radcheck->close();
+            if ($check->num_rows > 0) {
+                error_log("⚠️ Cliente ya existe en radcheck, saltando insert");
+                $check->close();
                 $conn->commit();
+            } else {
+                $check->close();
 
-                // avisar a Omada igual
-                $omada_url = 'http://192.168.0.9:8088'; // AJUSTA
-                omada_allow_client($omada_url, $token_omada, $mac_norm, $ap_norm, $essid);
+                // Insertar en clients
+                $stmt_clients = $conn->prepare("
+                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, ap_mac, ip)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ");
+                $stmt_clients->bind_param("ssssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm, $ap_norm, $client_ip);
+                $stmt_clients->execute();
+                $stmt_clients->close();
+                error_log("✅ Cliente insertado en tabla clients");
 
-                $_SESSION['wifi_zona_codigo'] = $zona_codigo;
-                $_SESSION['wifi_zona_nombre'] = $zona_nombre;
-                $_SESSION['wifi_zona_banner'] = $zona_banner;
-                redirect_to_tyc($mac_norm, $ip);
+                // Insertar en radcheck (autorización RADIUS)
+                $stmt_radcheck = $conn->prepare("
+                    INSERT INTO radcheck (username, attribute, op, value)
+                    VALUES (?, 'Auth-Type', ':=', 'Accept')
+                ");
+                $stmt_radcheck->bind_param("s", $mac_norm);
+                $stmt_radcheck->execute();
+                $stmt_radcheck->close();
+                error_log("✅ Cliente autorizado en radcheck");
+
+                $conn->commit();
             }
-            $check_radcheck->close();
 
-            // 2) insert en clients
-            $stmt_clients = $conn->prepare("
-                INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, ap_mac)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-            ");
-            $stmt_clients->bind_param("sssssss", $nombre, $apellido, $cedula, $telefono, $email, $mac_norm, $ap_norm);
-            $stmt_clients->execute();
-            $stmt_clients->close();
-
-            // 3) insert en radcheck
-            $stmt_radcheck = $conn->prepare("
-                INSERT INTO radcheck (username, attribute, op, value)
-                VALUES (?, 'Auth-Type', ':=', 'Accept')
-            ");
-            $stmt_radcheck->bind_param("s", $mac_norm);
-            $stmt_radcheck->execute();
-            $stmt_radcheck->close();
-
-            $conn->commit();
-
-            // avisar a Omada que ya está ok
-            $omada_url = 'http://192.168.0.9:8088'; // AJUSTA a tu controlador
-            omada_allow_client($omada_url, $token_omada, $mac_norm, $ap_norm, $essid);
-
-            // guardar zona
-            $_SESSION['wifi_zona_codigo'] = $zona_codigo;
-            $_SESSION['wifi_zona_nombre'] = $zona_nombre;
-            $_SESSION['wifi_zona_banner'] = $zona_banner;
-
-            // CoA
-            start_coa_async($mac_norm, $ap_ip);
-
-            redirect_to_bienvenido($mac_norm, $ip);
+            // CRÍTICO: Notificar al AP que el cliente está autorizado
+            error_log("🔔 Notificando al AP sobre autorización de: $mac_norm");
+            tplink_authorize_client($mac_norm, $ap_norm, $ssid, $token);
+            
+            // Forzar re-autenticación con CoA
+            sleep(1); // Pequeña pausa para que se registre
+            trigger_coa_disconnect($mac_norm);
+            
+            error_log("✅ Registro completado, redirigiendo a bienvenido");
+            redirect_to_bienvenido($mac_norm, $client_ip);
 
         } catch (Exception $e) {
             if ($conn->errno) {
                 $conn->rollback();
             }
 
+            error_log("❌ Error en registro: " . $e->getMessage());
+
             if ($conn->errno == 1062) {
-                // duplicado → mandar a TYC
-                $_SESSION['wifi_zona_codigo'] = $zona_codigo;
-                $_SESSION['wifi_zona_nombre'] = $zona_nombre;
-                $_SESSION['wifi_zona_banner'] = $zona_banner;
-                redirect_to_tyc($mac_norm, $ip);
+                // Duplicado, ya existe
+                error_log("⚠️ Duplicado detectado, redirigiendo a TYC");
+                tplink_authorize_client($mac_norm, $ap_norm, $ssid, $token);
+                trigger_coa_disconnect($mac_norm);
+                redirect_to_tyc($mac_norm, $client_ip);
             } else {
-                die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . " (Error: " . $conn->errno . ")</div>");
+                die("<div class='error'>❌ Registration failed: " . htmlspecialchars($e->getMessage()) . "</div>");
             }
         }
     } else {
-        $_POST['nombre']   = $nombre;
-        $_POST['apellido'] = $apellido;
-        $_POST['cedula']   = $cedula;
-        $_POST['telefono'] = $telefono;
-        $_POST['email']    = $email;
-    }
-}
-
-/* =========================================================
- * ESTADO DE MAC (para redir temprana)
- * ========================================================= */
-$mac_status    = 'new';
-$client_exists = false;
-if ($mac_norm !== '') {
-    try {
-        $check_radcheck_display = $conn->prepare("
-            SELECT id FROM radcheck 
-            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
-        ");
-        $check_radcheck_display->bind_param("s", $mac_norm);
-        $check_radcheck_display->execute();
-        $check_radcheck_display->store_result();
-
-        if ($check_radcheck_display->num_rows > 0) {
-            $mac_status = 'registered';
+        if ($mac_norm === '') {
+            error_log("❌ No se puede registrar: MAC vacía");
         }
-        $check_radcheck_display->close();
-
-        $check_clients_display = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
-        $check_clients_display->bind_param("s", $mac_norm);
-        $check_clients_display->execute();
-        $check_clients_display->store_result();
-
-        if ($check_clients_display->num_rows > 0) {
-            $client_exists = true;
-        }
-        $check_clients_display->close();
-
-    } catch (Exception $e) {
-        error_log("⚠️ Error verificando estado: " . $e->getMessage());
-    }
-
-    if ($mac_status === 'registered') {
-        // avisar también a Omada por si viene con token
-        $omada_url = 'http://192.168.0.9:8088'; // AJUSTA
-        omada_allow_client($omada_url, $token_omada, $mac_norm, $ap_norm, $essid);
-
-        $_SESSION['wifi_zona_codigo'] = $zona_codigo;
-        $_SESSION['wifi_zona_nombre'] = $zona_nombre;
-        $_SESSION['wifi_zona_banner'] = $zona_banner;
-        redirect_to_tyc($mac_norm, $ip);
+        error_log("❌ Errores de validación: " . json_encode($errors));
     }
 }
 ?>
@@ -549,6 +514,7 @@ if ($mac_norm !== '') {
             box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
         }
         button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
         .error {
             background: #ffebee; color: #c62828; padding: 12px; border-radius: 10px;
             margin: 15px 0; text-align: center; font-size: 0.9rem; border-left: 4px solid #c62828;
@@ -567,6 +533,11 @@ if ($mac_norm !== '') {
             background: #fff3e0; padding: 15px; border-radius: 10px; margin: 15px 0;
             font-size: 0.95rem; color: #ef6c00; text-align: center; border-left: 4px solid #ff9800;
         }
+        .debug-info {
+            background: #f5f5f5; padding: 12px; border-radius: 10px; margin: 15px 0;
+            font-size: 0.85rem; color: #666; font-family: monospace;
+            max-height: 200px; overflow-y: auto;
+        }
         .required::after { content: " *"; color: #e74c3c; }
         .terminos-container {
             background: #f8f9fa; padding: 15px; border-radius: 10px; margin: 15px 0;
@@ -582,22 +553,6 @@ if ($mac_norm !== '') {
             font-size:0.8rem; display:inline-block; margin-bottom:15px; width:100%;
             text-align:center;
         }
-        .admin-link {
-            margin-top: 15px;
-            font-size: 0.9rem;
-            text-align: center;
-        }
-        .admin-link a {
-            color: #fff;
-            background: rgba(0,0,0,0.3);
-            padding: 8px 16px;
-            border-radius: 999px;
-            text-decoration: none;
-            font-weight: 600;
-        }
-        .admin-link a:hover {
-            background: rgba(0,0,0,0.5);
-        }
         @media (max-width: 480px) {
             .form-container { padding: 25px 20px; border-radius: 15px; margin: 15px 0; }
             input, button { font-size: 1rem; }
@@ -608,44 +563,52 @@ if ($mac_norm !== '') {
 </head>
 <body>
 
-    <img src="gonetlogo.png" alt="GoNet Logo" class="top-image">
+    <img src="gonetlogo.png" alt="GoNet Logo" class="top-image" onerror="this.style.display='none'">
 
     <div class="form-container">
-        <h2>Registro para Wi-Fi</h2>
+        <h2>🌐 Registro Wi-Fi</h2>
 
         <?php if ($zona_codigo !== ''): ?>
             <div class="zona-badge">
-                📍 Zona detectada: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong><br>
-                🟣 AP: <strong>detectado</strong>
-            </div>
-        <?php else: ?>
-            <div class="zona-badge" style="background:#ffecec;color:#b71c1c;">
-                ⚠️ No se pudo determinar la zona de este AP
+                📍 Zona: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong><br>
+                🔷 AP: <strong><?php echo htmlspecialchars(AP_IP); ?></strong>
             </div>
         <?php endif; ?>
 
+        <!-- DEBUG INFO -->
+        <div class="debug-info">
+            <strong>🔍 Debug Info:</strong><br>
+            AP IP: <?php echo htmlspecialchars($ap_ip); ?><br>
+            Cliente MAC: <?php echo htmlspecialchars($mac_norm ?: 'No detectada'); ?><br>
+            AP MAC: <?php echo htmlspecialchars($ap_norm ?: 'No detectada'); ?><br>
+            Cliente IP: <?php echo htmlspecialchars($client_ip); ?><br>
+            Token: <?php echo htmlspecialchars($token ?: 'No enviado'); ?><br>
+            SSID: <?php echo htmlspecialchars($ssid ?: 'No enviado'); ?>
+        </div>
+
         <?php if ($mac_norm === ''): ?>
             <div class="error">
-                ❌ No se detectó ninguna dirección MAC del dispositivo.<br>
-                <small>Conéctate a la red Wi-Fi y vuelve a intentar.</small>
+                ❌ No se detectó tu dirección MAC.<br>
+                <small>Asegúrate de estar conectado a la red Wi-Fi.<br>
+                Parámetros recibidos: <?php echo htmlspecialchars(json_encode($_GET)); ?></small>
             </div>
         <?php elseif ($mac_status === 'registered'): ?>
             <div class="status-info">
                 ✅ Este dispositivo ya está registrado.<br>
                 Redirigiendo...
             </div>
-        <?php elseif ($client_exists && $mac_status === 'new'): ?>
+        <?php elseif ($client_exists): ?>
             <div class="warning-info">
-                ⚠️ Dispositivo visto antes, completa el registro.
+                ⚠️ Dispositivo conocido. Completa el registro.
             </div>
         <?php else: ?>
             <div class="info-display">
-                📝 Completa el registro para acceder a Internet.
+                📝 Completa tu registro para acceder a Internet
             </div>
         <?php endif; ?>
 
         <?php if ($mac_norm !== '' && $mac_status !== 'registered'): ?>
-        <form method="POST" autocomplete="on" id="registrationForm" novalidate>
+        <form method="POST" id="registrationForm" novalidate>
             <div class="form-group">
                 <label class="required">Nombre</label>
                 <input type="text" name="nombre" placeholder="Tu nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
@@ -660,196 +623,17 @@ if ($mac_norm !== '') {
 
             <div class="form-group">
                 <label class="required">Cédula</label>
-                <input
-                    type="text"
-                    name="cedula"
-                    placeholder="Número de cédula (10 dígitos)"
-                    required
-                    inputmode="numeric"
-                    pattern="\d{10}"
-                    value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
+                <input type="text" name="cedula" placeholder="10 dígitos" required inputmode="numeric" pattern="\d{10}" value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
                 <?php if (!empty($errors['cedula'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['cedula']); ?></div><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="required">Teléfono</label>
-                <input
-                    type="tel"
-                    name="telefono"
-                    placeholder="09XXXXXXXX"
-                    required
-                    inputmode="tel"
-                    pattern="^09\d{8}$"
-                    value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
+                <input type="tel" name="telefono" placeholder="09XXXXXXXX" required inputmode="tel" pattern="^09\d{8}$" value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
                 <?php if (!empty($errors['telefono'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['telefono']); ?></div><?php endif; ?>
             </div>
 
             <div class="form-group">
                 <label class="required">Email</label>
-                <input
-                    type="email"
-                    name="email"
-                    placeholder="correo@ejemplo.com"
-                    required
-                    value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
-                <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['email']); ?></div><?php endif; ?>
-            </div>
-
-            <div class="terminos-container">
-                <div class="terminos-checkbox">
-                    <input type="checkbox" name="terminos" id="terminos" <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?> required>
-                    <label for="terminos" class="terminos-text">
-                        Acepto los <a href="terminos.html" target="_blank" class="terminos-link">Términos y Condiciones</a>
-                        y la <a href="privacidad.html" target="_blank" class="terminos-link">Política de Privacidad</a>.
-                    </label>
-                </div>
-                <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['terminos']); ?></div><?php endif; ?>
-            </div>
-
-            <!-- Datos ocultos -->
-            <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
-            <input type="hidden" name="ip"  value="<?php echo htmlspecialchars($ip); ?>">
-            <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
-            <input type="hidden" name="ap_ip"  value="<?php echo htmlspecialchars($ap_ip); ?>">
-
-            <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
-        </form>
-        <?php endif; ?>
-    </div>
-
-    <!-- Publicidad -->
-    <?php if ($zona_banner): ?>
-        <img src="<?php echo htmlspecialchars($zona_banner); ?>" alt="Publicidad zona <?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?>" class="bottom-image">
-    <?php else: ?>
-        <img src="banner.png" alt="Banner" class="bottom-image">
-    <?php endif; ?>
-
-    <!-- Link admin -->
-    <div class="admin-link">
-        <p>🔐 Iniciar al portal de administración</p>
-        <a href="admin_zonas.php">Ir a admin_zonas.php</a>
-    </div>
-
-    <script>
-        const form = document.getElementById('registrationForm');
-        if (form) {
-            const fields = {
-                nombre:   form.querySelector('[name="nombre"]'),
-                apellido: form.querySelector('[name="apellido"]'),
-                cedula:   form.querySelector('[name="cedula"]'),
-                telefono: form.querySelector('[name="telefono"]'),
-                email:    form.querySelector('[name="email"]'),
-                terminos: form.querySelector('[name="terminos"]'),
-            };
-
-            function validarCedulaEC(ced) {
-                ced = ced.replace(/\D+/g,'');
-                if (!/^\d{10}$/.test(ced)) return false;
-                const prov = parseInt(ced.slice(0,2),10);
-                if (prov < 1 || prov > 24) return false;
-                const t = parseInt(ced[2],10);
-                if (t >= 6) return false;
-                const coef = [2,1,2,1,2,1,2,1,2];
-                let suma = 0;
-                for (let i=0;i<9;i++){
-                    let prod = parseInt(ced[i],10) * coef[i];
-                    if (prod >= 10) prod -= 9;
-                    suma += prod;
-                }
-                const dv = (10 - (suma % 10)) % 10;
-                return dv === parseInt(ced[9],10);
-            }
-
-            function validarTelefonoEC(tel) {
-                tel = tel.replace(/\D+/g,'');
-                return /^09\d{8}$/.test(tel);
-            }
-
-            function validarEmailBasico(mail) {
-                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail);
-            }
-
-            function setError(input, msg) {
-                let errDiv = input.parentElement.querySelector('.field-error');
-                if (msg) {
-                    if (!errDiv) {
-                        errDiv = document.createElement('div');
-                        errDiv.className = 'field-error';
-                        input.parentElement.appendChild(errDiv);
-                    }
-                    errDiv.textContent = msg;
-                    input.setAttribute('aria-invalid', 'true');
-                } else {
-                    if (errDiv) errDiv.textContent = '';
-                    input.removeAttribute('aria-invalid');
-                }
-            }
-
-            function validateAll() {
-                let hasErrors = false;
-
-                if (!fields.nombre.value.trim()) {
-                    setError(fields.nombre, 'Ingresa tu nombre.');
-                    hasErrors = true;
-                } else setError(fields.nombre, '');
-
-                if (!fields.apellido.value.trim()) {
-                    setError(fields.apellido, 'Ingresa tu apellido.');
-                    hasErrors = true;
-                } else setError(fields.apellido, '');
-
-                const ced = fields.cedula.value;
-                if (!validarCedulaEC(ced)) {
-                    setError(fields.cedula, 'Cédula inválida.');
-                    hasErrors = true;
-                } else setError(fields.cedula, '');
-
-                const tel = fields.telefono.value;
-                if (!validarTelefonoEC(tel)) {
-                    setError(fields.telefono, 'Teléfono inválido.');
-                    hasErrors = true;
-                } else setError(fields.telefono, '');
-
-                const mail = fields.email.value;
-                if (!validarEmailBasico(mail)) {
-                    setError(fields.email, 'Correo inválido.');
-                    hasErrors = true;
-                } else setError(fields.email, '');
-
-                if (!fields.terminos.checked) {
-                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
-                    if (!errDiv) {
-                        errDiv = document.createElement('div');
-                        errDiv.className = 'field-error';
-                        fields.terminos.closest('.terminos-container').appendChild(errDiv);
-                    }
-                    errDiv.textContent = 'Debes aceptar los términos.';
-                    hasErrors = true;
-                } else {
-                    let errDiv = fields.terminos.closest('.terminos-container').querySelector('.field-error');
-                    if (errDiv) errDiv.textContent = '';
-                }
-
-                return !hasErrors;
-            }
-
-            form.addEventListener('submit', function(e) {
-                if (!validateAll()) {
-                    e.preventDefault();
-                    return false;
-                }
-                const submitBtn = document.getElementById('submitBtn');
-                if (submitBtn) {
-                    submitBtn.innerHTML = '⏳ Procesando...';
-                    submitBtn.disabled = true;
-                }
-            });
-
-            ['input','change','blur'].forEach(evt => {
-                form.addEventListener(evt, () => validateAll(), true);
-            });
-        }
-    </script>
-
-</body>
-</html>
+                <input type="email" name="email" placeholder="correo@ejemplo.com" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+                <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo htmlspecialchars($errors['email']); ?>
