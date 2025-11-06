@@ -177,3 +177,19 @@
 11-06-2025 10:12:48.037 INFO [comm-pool-10] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
 11-06-2025 10:17:48.035 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): Target firmware check task run
 11-06-2025 10:17:48.037 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
+11-06-2025 10:22:48.036 INFO [comm-pool-15] [] c.t.s.o.m.d.a.u.f.d(): Target firmware check task run
+11-06-2025 10:22:48.042 INFO [comm-pool-15] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
+11-06-2025 10:27:48.035 INFO [comm-pool-15] [] c.t.s.o.m.d.a.u.f.d(): Target firmware check task run
+11-06-2025 10:27:48.037 INFO [comm-pool-15] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
+11-06-2025 10:36:47.933 INFO [server-comm-pool-0] [] c.t.s.e.s.c.h.EcspV2DeviceContextHelper(): pending device 30-68-93-15-B6-92 time out, remove device context
+11-06-2025 10:36:49.251 INFO [smb-schedule-local-system-time-check-task] [] c.t.s.c.s.p.l.SystemTimeCheckTask(): reschedule all cron and fixrate task
+11-06-2025 10:36:49.617 WARN [smb-schedule-local-system-time-check-task] [] c.t.s.o.m.k.a(): Cannot find any site in OmadacId(ac43648f87e429fc31ad4194980333c0).
+11-06-2025 10:36:49.624 WARN [smb-schedule-local-system-time-check-task] [] c.t.s.o.m.k.b(): Cannot find any site.
+11-06-2025 10:37:19.236 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): Target firmware check task run
+11-06-2025 10:37:19.237 INFO [update-device-model-info-task-pool-0] [] c.t.s.o.m.d.d.m.d.d(): start to update device model template information
+11-06-2025 10:37:19.238 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
+11-06-2025 10:37:19.238 INFO [check-ca-certificate-update-work-group-0] [] c.t.s.o.m.c.f(): Checking Last Ca Certification...
+11-06-2025 10:38:17.239 INFO [check-update-work-group-0] [] c.t.s.o.m.c.r(): Start sync Cloud Users OmadacId(ac43648f87e429fc31ad4194980333c0).
+11-06-2025 10:42:19.235 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): Target firmware check task run
+11-06-2025 10:42:19.236 INFO [comm-pool-14] [] c.t.s.o.m.d.a.u.f.d(): no omadac need handle target firmware upgrade
+11-06-2025 10:43:45.036 INFO [monitor-common-block-pool-10] [] c.t.s.o.m.d.c.a.a(): no msp history data found.

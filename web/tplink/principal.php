@@ -5,12 +5,13 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+/* ===================== DB CONFIG ===================== */
 $host = "mysql";
 $user = "radius";
 $pass = "radpass";
 $db   = "radius";
 
-// TP-Link AP Configuration
+/* ===================== AP / RADIUS CONFIG ===================== */
 define('AP_IP', '192.168.0.7');
 define('RADIUS_SECRET', 'telecom');
 define('COA_PORT', '3799');
@@ -89,8 +90,7 @@ function redirect_to_tyc($mac_norm, $ip) {
 }
 
 /* =========================================================
- * HELPER: lanzar CoA (Change of Authorization) 
- * Esto fuerza al AP a re-autenticar al cliente
+ * CoA opcional (por si quieres forzar reautenticación)
  * ========================================================= */
 function trigger_coa_disconnect($mac) {
     if (empty($mac)) {
@@ -102,7 +102,7 @@ function trigger_coa_disconnect($mac) {
     $secret = RADIUS_SECRET;
     $port = COA_PORT;
 
-    // Comando para desconectar (forzar re-autenticación)
+    // Forzar una desconexión (re-auth) vía radclient
     $cmd = sprintf(
         'echo "User-Name=%s" | radclient -r 2 -t 3 -x %s:%s disconnect %s >> /tmp/coa.log 2>&1 &',
         escapeshellarg($mac),
@@ -113,21 +113,15 @@ function trigger_coa_disconnect($mac) {
 
     error_log("🚀 Lanzando CoA: $cmd");
     @exec($cmd);
-    
     return true;
 }
 
 /* =========================================================
- * TP-Link External Portal Authentication
- * Este método notifica al AP que el usuario está autorizado
+ * (Legacy) Intento de autorización directa al AP (standalone)
+ * En Omada no es necesario; dejamos como fallback.
  * ========================================================= */
 function tplink_authorize_client($clientMac, $apMac = '', $ssid = '', $token = '') {
     $ap_ip = AP_IP;
-    
-    // Para TP-Link standalone AP (no Omada controller)
-    // El AP típicamente expone una página de autorización
-    
-    // Intentar múltiples endpoints comunes de TP-Link
     $endpoints = [
         "http://{$ap_ip}/portal_auth.cgi",
         "http://{$ap_ip}/cgi-bin/portal_auth",
@@ -136,81 +130,88 @@ function tplink_authorize_client($clientMac, $apMac = '', $ssid = '', $token = '
 
     $payload = [
         'clientMac' => $clientMac,
-        'success' => 'true',
-        'authType' => 'radius',
+        'success'   => 'true',
+        'authType'  => 'radius',
     ];
 
     if ($apMac) $payload['apMac'] = $apMac;
-    if ($ssid) $payload['ssid'] = $ssid;
+    if ($ssid)  $payload['ssid']  = $ssid;
     if ($token) $payload['token'] = $token;
 
-    error_log("🔐 Intentando autorizar cliente: " . json_encode($payload));
+    error_log("🔐 Intentando autorizar cliente (fallback): " . json_encode($payload));
 
     foreach ($endpoints as $url) {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
-            CURLOPT_POST => true,
+            CURLOPT_POST           => true,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_POSTFIELDS => json_encode($payload),
-            CURLOPT_TIMEOUT => 3,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+            CURLOPT_POSTFIELDS     => json_encode($payload),
+            CURLOPT_TIMEOUT        => 3,
             CURLOPT_CONNECTTIMEOUT => 2,
         ]);
-        
+
         $resp = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
         curl_close($ch);
 
         error_log("🔍 Endpoint: $url → HTTP $http_code → Resp: $resp");
-        
         if ($http_code >= 200 && $http_code < 300) {
             error_log("✅ Cliente autorizado en: $url");
             return true;
         }
     }
-    
-    error_log("⚠️ No se pudo notificar al AP directamente, usando CoA");
+
+    error_log("⚠️ No se pudo notificar al AP directamente (fallback).");
     return false;
 }
 
 /* =========================================================
- * VALIDACIONES ECU
+ * 🔑 CLAVE: Omada Controller /portal/radius/browserauth
+ * Tu portal debe POSTEAR aquí para que Omada llame a RADIUS.
  * ========================================================= */
-function validarCedulaEC(string $cedula): bool {
-    if (!preg_match('/^\d{10}$/', $cedula)) return false;
-
-    $prov = (int)substr($cedula, 0, 2);
-    if ($prov < 1 || $prov > 24) return false;
-
-    $tercer = (int)$cedula[2];
-    if ($tercer >= 6) return false;
-
-    $coef = [2,1,2,1,2,1,2,1,2];
-    $suma = 0;
-    for ($i = 0; $i < 9; $i++) {
-        $prod = (int)$cedula[$i] * $coef[$i];
-        if ($prod >= 10) $prod -= 9;
-        $suma += $prod;
+function omada_radius_browserauth($target, $targetPort, $username, $password, $clientMac, $clientIp, $apMac, $ssidName, $radioId, $originUrl) {
+    if (!$target || !$targetPort) {
+        error_log("❌ browserauth: faltan target/targetPort");
+        return false;
     }
-    $dv = (10 - ($suma % 10)) % 10;
-    return $dv === (int)$cedula[9];
-}
 
-function validarTelefonoEC(string $tel): bool {
-    $tel = preg_replace('/\D+/', '', $tel);
-    return preg_match('/^09\d{8}$/', $tel) === 1;
-}
+    // Preferir HTTPS si targetPort es 8043; si no, HTTP
+    $scheme = ($targetPort == '8043' || $targetPort == 8043) ? "https" : "http";
+    $url = "{$scheme}://{$target}:{$targetPort}/portal/radius/browserauth";
 
-function validarEmailReal(string $email): bool {
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
-    $dom = substr(strrchr($email, "@"), 1);
-    if (!$dom) return false;
+    // x-www-form-urlencoded evita CORS y es lo esperado por Omada
+    $fields = http_build_query([
+        'username'   => $username,
+        'password'   => $password,
+        'clientMac'  => $clientMac,
+        'clientIp'   => $clientIp,
+        'apMac'      => $apMac,
+        'ssidName'   => $ssidName,
+        'radioId'    => ($radioId === '' ? '0' : $radioId),
+        'originUrl'  => $originUrl,
+    ]);
 
-    $mxOk = function_exists('checkdnsrr') ? checkdnsrr($dom, 'MX') : false;
-    $aOk  = function_exists('checkdnsrr') ? checkdnsrr($dom, 'A')  : false;
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
+        CURLOPT_POSTFIELDS     => $fields,
+        CURLOPT_TIMEOUT        => 6,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        // En laboratorios locales, el cert puede ser self-signed:
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
 
-    return (function_exists('checkdnsrr')) ? ($mxOk || $aOk) : true;
+    error_log("📡 browserauth POST {$url} → HTTP $code; resp: $resp; err: $err");
+    return ($code >= 200 && $code < 300);
 }
 
 /* =========================================================
@@ -236,19 +237,30 @@ error_log("REMOTE_ADDR: " . ($_SERVER['REMOTE_ADDR'] ?? 'N/A'));
 error_log("HTTP_X_FORWARDED_FOR: " . ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? 'N/A'));
 
 /* =========================================================
- * PARÁMETROS QUE MANDA TP-LINK
+ * PARÁMETROS QUE MANDA OMADA AL PORTAL
+ * (nombres comunes: clientMac, clientIp, apMac, ssidName, radioId,
+ *  originUrl, target, targetPort)
  * ========================================================= */
 $client_mac_raw = $_GET['clientMac'] ?? $_POST['clientMac'] ?? $_GET['mac'] ?? $_POST['mac'] ?? '';
-$ap_mac_raw = $_GET['ap'] ?? $_POST['ap'] ?? $_GET['apMac'] ?? $_POST['apMac'] ?? '';
-$ap_ip_raw = $_GET['target'] ?? $_POST['target'] ?? $_GET['ip'] ?? $_POST['ip'] ?? AP_IP;
-$token = $_GET['token'] ?? $_POST['token'] ?? '';
-$ssid = $_GET['ssid'] ?? $_POST['ssid'] ?? '';
-$redirect_url = $_GET['url'] ?? $_POST['url'] ?? $_GET['redirect'] ?? '';
+$ap_mac_raw     = $_GET['ap'] ?? $_POST['ap'] ?? $_GET['apMac'] ?? $_POST['apMac'] ?? '';
+$ap_ip_raw      = $_GET['target'] ?? $_POST['target'] ?? $_GET['ip'] ?? $_POST['ip'] ?? AP_IP; // ojo: 'target' NO es AP IP, es Controller IP (en Omada)
+$token          = $_GET['token'] ?? $_POST['token'] ?? '';
+$ssid           = $_GET['ssid'] ?? $_POST['ssid'] ?? '';
+$redirect_url   = $_GET['url'] ?? $_POST['url'] ?? $_GET['redirect'] ?? '';
 
-$mac_norm = normalize_mac($client_mac_raw);
-$ap_norm = normalize_mac($ap_mac_raw);
-$ap_ip = only_ip_part($ap_ip_raw) ?: AP_IP;
-$client_ip = $_SERVER['REMOTE_ADDR'] ?? '';
+/* Omada controller params explícitos */
+$target         = $_GET['target']     ?? $_POST['target']     ?? '';       // Controller IP/host
+$targetPort     = $_GET['targetPort'] ?? $_POST['targetPort'] ?? '8088';   // 8088 http / 8043 https
+$radioId        = $_GET['radioId']    ?? $_POST['radioId']    ?? '0';
+$ssidName       = $_GET['ssidName']   ?? $_POST['ssidName']   ?? ($ssid ?: '');
+$originUrl      = $_GET['originUrl']  ?? $_POST['originUrl']  ?? $redirect_url;
+$clientIp_om    = $_GET['clientIp']   ?? $_POST['clientIp']   ?? ($_SERVER['REMOTE_ADDR'] ?? '');
+
+/* Normalizaciones */
+$mac_norm   = normalize_mac($client_mac_raw);
+$ap_norm    = normalize_mac($ap_mac_raw);
+$ap_ip      = only_ip_part($ap_ip_raw) ?: AP_IP; // solo para UI/debug
+$client_ip  = $_SERVER['REMOTE_ADDR'] ?? '';
 
 $errors = [
     'nombre'   => '',
@@ -262,11 +274,14 @@ $errors = [
 error_log("📋 PARÁMETROS PROCESADOS:");
 error_log("  - MAC Cliente: $mac_norm");
 error_log("  - AP MAC: $ap_norm");
-error_log("  - AP IP: $ap_ip");
-error_log("  - Cliente IP: $client_ip");
+error_log("  - AP IP (UI): $ap_ip");
+error_log("  - Cliente IP (server): $client_ip");
+error_log("  - Omada target: $target");
+error_log("  - Omada targetPort: $targetPort");
+error_log("  - SSID/ssidName: " . ($ssidName ?: $ssid));
+error_log("  - radioId: $radioId");
+error_log("  - originUrl: $originUrl");
 error_log("  - Token: $token");
-error_log("  - SSID: $ssid");
-error_log("  - Redirect URL: $redirect_url");
 
 /* =========================================================
  *  RESOLVER ZONA POR AP
@@ -311,47 +326,57 @@ $client_exists = false;
 
 if ($mac_norm !== '') {
     try {
-        // Verificar si ya está en radcheck (ya autorizado)
+        // ¿ya autorizado en radcheck?
         $check_radcheck = $conn->prepare("
             SELECT id FROM radcheck 
-            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
+            WHERE username = ? AND (
+                (attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept') OR
+                (attribute = 'Cleartext-Password' AND op = ':=')
+            )
+            LIMIT 1
         ");
         $check_radcheck->bind_param("s", $mac_norm);
         $check_radcheck->execute();
-        $check_radcheck->store_result();
+        $has_rc = $check_radcheck->get_result()->num_rows > 0;
+        $check_radcheck->close();
 
-        if ($check_radcheck->num_rows > 0) {
+        if ($has_rc) {
             $mac_status = 'registered';
             error_log("✅ Cliente ya registrado en radcheck: $mac_norm");
         }
-        $check_radcheck->close();
 
-        // Verificar si existe en clients
-        $check_clients = $conn->prepare("SELECT id FROM clients WHERE mac = ?");
+        // ¿existe en clients?
+        $check_clients = $conn->prepare("SELECT id FROM clients WHERE mac = ? LIMIT 1");
         $check_clients->bind_param("s", $mac_norm);
         $check_clients->execute();
-        $check_clients->store_result();
-
-        if ($check_clients->num_rows > 0) {
-            $client_exists = true;
-            error_log("✅ Cliente encontrado en tabla clients: $mac_norm");
-        }
+        $client_exists = $check_clients->get_result()->num_rows > 0;
         $check_clients->close();
+
+        if ($client_exists) error_log("✅ Cliente encontrado en tabla clients: $mac_norm");
 
     } catch (Exception $e) {
         error_log("⚠️ Error verificando estado: " . $e->getMessage());
     }
 
-    // Si ya está registrado, notificar al AP y redirigir
+    // Si ya está registrado, lanzar browserauth hacia Omada y redirigir
     if ($mac_status === 'registered') {
-        error_log("🔄 Cliente ya registrado, notificando al AP y redirigiendo");
-        
-        // Intentar notificar al AP
-        tplink_authorize_client($mac_norm, $ap_norm, $ssid, $token);
-        
-        // Forzar re-autenticación con CoA
-        trigger_coa_disconnect($mac_norm);
-        
+        error_log("🔄 Cliente ya registrado → invocando browserauth hacia Omada");
+
+        // Usamos MAC=usuario y MAC=clave (coherente con Cleartext-Password o dummy)
+        $u = $mac_norm; $p = $mac_norm;
+
+        $ok = omada_radius_browserauth(
+            $target, $targetPort, $u, $p, $mac_norm, ($clientIp_om ?: $client_ip),
+            $ap_norm, ($ssidName ?: $ssid), $radioId, $originUrl
+        );
+
+        // (Opcional) CoA como empujón extra
+        if (!$ok) {
+            error_log("⚠️ browserauth falló, intento CoA/fallback");
+            tplink_authorize_client($mac_norm, $ap_norm, ($ssidName ?: $ssid), $token);
+            trigger_coa_disconnect($mac_norm);
+        }
+
         redirect_to_tyc($mac_norm, $client_ip);
     }
 }
@@ -361,7 +386,7 @@ if ($mac_norm !== '') {
  * ========================================================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
     error_log("📝 Procesando formulario de registro");
-    
+
     $nombre   = trim($_POST['nombre']   ?? '');
     $apellido = trim($_POST['apellido'] ?? '');
     $cedula   = preg_replace('/\D+/', '', $_POST['cedula'] ?? '');
@@ -372,18 +397,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
     // Validaciones
     if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
     if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
-    if (!validarCedulaEC($cedula)) {
-        $errors['cedula'] = 'Cédula inválida.';
-    }
-    if (!validarTelefonoEC($telefono)) {
-        $errors['telefono'] = 'Teléfono inválido.';
-    }
-    if (!validarEmailReal($email)) {
-        $errors['email'] = 'Correo inválido.';
-    }
-    if (!$terminos) {
-        $errors['terminos'] = 'Debes aceptar los términos.';
-    }
+    if (!validarCedulaEC($cedula))   $errors['cedula']   = 'Cédula inválida.';
+    if (!validarTelefonoEC($telefono)) $errors['telefono'] = 'Teléfono inválido.';
+    if (!validarEmailReal($email))   $errors['email']    = 'Correo inválido.';
+    if (!$terminos)                  $errors['terminos'] = 'Debes aceptar los términos.';
 
     $hayErrores = array_filter($errors, fn($e) => $e !== '');
 
@@ -392,20 +409,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             $conn->begin_transaction();
             error_log("🔄 Iniciando transacción de registro para: $mac_norm");
 
-            // Verificar si ya existe
-            $check = $conn->prepare("SELECT id FROM radcheck WHERE username = ?");
+            // ¿ya existe en radcheck?
+            $check = $conn->prepare("SELECT id FROM radcheck WHERE username = ? LIMIT 1");
             $check->bind_param("s", $mac_norm);
             $check->execute();
-            $check->store_result();
+            $existe_rc = $check->get_result()->num_rows > 0;
+            $check->close();
 
-            if ($check->num_rows > 0) {
-                error_log("⚠️ Cliente ya existe en radcheck, saltando insert");
-                $check->close();
-                $conn->commit();
-            } else {
-                $check->close();
-
-                // ⬇⬇⬇ INSERT EN clients (ajustado a tus columnas, sin 'ip')
+            if (!$existe_rc) {
+                // Insert en clients
                 $stmt_clients = $conn->prepare("
                     INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)
@@ -415,41 +427,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
                 $stmt_clients->close();
                 error_log("✅ Cliente insertado en tabla clients");
 
-                // Insertar en radcheck (autorización RADIUS)
-                $stmt_radcheck = $conn->prepare("
-                    INSERT INTO radcheck (username, attribute, op, value)
-                    VALUES (?, 'Auth-Type', ':=', 'Accept')
-                ");
-                $stmt_radcheck->bind_param("s", $mac_norm);
-                $stmt_radcheck->execute();
-                $stmt_radcheck->close();
-                error_log("✅ Cliente autorizado en radcheck");
+                // --- Estilo A: Auth-Type := Accept (sin password real)
+                // $stmt_rc = $conn->prepare("
+                //    INSERT INTO radcheck (username, attribute, op, value)
+                //    VALUES (?, 'Auth-Type', ':=', 'Accept')
+                // ");
 
-                $conn->commit();
+                // --- Estilo B: username = MAC, password = MAC (recomendado para browserauth)
+                $stmt_rc = $conn->prepare("
+                    INSERT INTO radcheck (username, attribute, op, value)
+                    VALUES (?, 'Cleartext-Password', ':=', ?)
+                ");
+                $stmt_rc->bind_param("ss", $mac_norm, $mac_norm);
+                $stmt_rc->execute();
+                $stmt_rc->close();
+                error_log("✅ Cliente autorizado en radcheck");
+            } else {
+                error_log("⚠️ Cliente ya existía en radcheck");
             }
 
-            // CRÍTICO: Notificar al AP que el cliente está autorizado
-            error_log("🔔 Notificando al AP sobre autorización de: $mac_norm");
-            tplink_authorize_client($mac_norm, $ap_norm, $ssid, $token);
-            
-            // Forzar re-autenticación con CoA
-            sleep(1); // Pausa corta
-            trigger_coa_disconnect($mac_norm);
-            
+            $conn->commit();
+
+            // 🔔 CLAVE: invocar browserauth (Omada → RADIUS)
+            $u = $mac_norm; $p = $mac_norm; // coherente con Cleartext-Password
+            $ok = omada_radius_browserauth(
+                $target, $targetPort, $u, $p, $mac_norm, ($clientIp_om ?: $client_ip),
+                $ap_norm, ($ssidName ?: $ssid), $radioId, $originUrl
+            );
+
+            if (!$ok) {
+                error_log("⚠️ browserauth falló, intento fallback (AP notify + CoA)");
+                tplink_authorize_client($mac_norm, $ap_norm, ($ssidName ?: $ssid), $token);
+                sleep(1);
+                trigger_coa_disconnect($mac_norm);
+            }
+
             error_log("✅ Registro completado, redirigiendo a bienvenido");
             redirect_to_bienvenido($mac_norm, $client_ip);
 
         } catch (Exception $e) {
-            if ($conn->errno) {
-                $conn->rollback();
-            }
-
+            if ($conn->errno) $conn->rollback();
             error_log("❌ Error en registro: " . $e->getMessage());
 
             if ($conn->errno == 1062) {
-                // Duplicado, ya existe
-                error_log("⚠️ Duplicado detectado, redirigiendo a TYC");
-                tplink_authorize_client($mac_norm, $ap_norm, $ssid, $token);
+                // Duplicado (ya existía) → igual intentamos browserauth
+                error_log("⚠️ Duplicado detectado, intentar browserauth + redirigir");
+                $u = $mac_norm; $p = $mac_norm;
+                omada_radius_browserauth(
+                    $target, $targetPort, $u, $p, $mac_norm, ($clientIp_om ?: $client_ip),
+                    $ap_norm, ($ssidName ?: $ssid), $radioId, $originUrl
+                );
                 trigger_coa_disconnect($mac_norm);
                 redirect_to_tyc($mac_norm, $client_ip);
             } else {
@@ -457,11 +484,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             }
         }
     } else {
-        if ($mac_norm === '') {
-            error_log("❌ No se puede registrar: MAC vacía");
-        }
+        if ($mac_norm === '') error_log("❌ No se puede registrar: MAC vacía");
         error_log("❌ Errores de validación: " . json_encode($errors));
     }
+}
+
+/* =========================================================
+ * VALIDACIONES ECU
+ * ========================================================= */
+function validarCedulaEC(string $cedula): bool {
+    if (!preg_match('/^\d{10}$/', $cedula)) return false;
+    $prov = (int)substr($cedula, 0, 2);
+    if ($prov < 1 || $prov > 24) return false;
+    $tercer = (int)$cedula[2];
+    if ($tercer >= 6) return false;
+    $coef = [2,1,2,1,2,1,2,1,2];
+    $suma = 0;
+    for ($i = 0; $i < 9; $i++) {
+        $prod = (int)$cedula[$i] * $coef[$i];
+        if ($prod >= 10) $prod -= 9;
+        $suma += $prod;
+    }
+    $dv = (10 - ($suma % 10)) % 10;
+    return $dv === (int)$cedula[9];
+}
+
+function validarTelefonoEC(string $tel): bool {
+    $tel = preg_replace('/\D+/', '', $tel);
+    return preg_match('/^09\d{8}$/', $tel) === 1;
+}
+
+function validarEmailReal(string $email): bool {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
+    $dom = substr(strrchr($email, "@"), 1);
+    if (!$dom) return false;
+    $mxOk = function_exists('checkdnsrr') ? checkdnsrr($dom, 'MX') : false;
+    $aOk  = function_exists('checkdnsrr') ? checkdnsrr($dom, 'A')  : false;
+    return (function_exists('checkdnsrr')) ? ($mxOk || $aOk) : true;
 }
 ?>
 <!DOCTYPE html>
@@ -536,7 +595,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
         .debug-info {
             background: #f5f5f5; padding: 12px; border-radius: 10px; margin: 15px 0;
             font-size: 0.85rem; color: #666; font-family: monospace;
-            max-height: 200px; overflow-y: auto;
+            max-height: 240px; overflow-y: auto;
         }
         .required::after { content: " *"; color: #e74c3c; }
         .terminos-container {
@@ -571,19 +630,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
         <?php if ($zona_codigo !== ''): ?>
             <div class="zona-badge">
                 📍 Zona: <strong><?php echo htmlspecialchars($zona_nombre ?: $zona_codigo); ?></strong><br>
-                🔷 AP: <strong><?php echo htmlspecialchars(AP_IP); ?></strong>
+                🔷 AP (UI): <strong><?php echo htmlspecialchars(AP_IP); ?></strong>
             </div>
         <?php endif; ?>
 
         <!-- DEBUG INFO -->
         <div class="debug-info">
             <strong>🔍 Debug Info:</strong><br>
-            AP IP: <?php echo htmlspecialchars($ap_ip); ?><br>
+            Controller target: <?php echo htmlspecialchars($target ?: 'No enviado'); ?><br>
+            Controller targetPort: <?php echo htmlspecialchars($targetPort ?: 'No enviado'); ?><br>
+            AP IP (UI): <?php echo htmlspecialchars($ap_ip ?: ''); ?><br>
             Cliente MAC: <?php echo htmlspecialchars($mac_norm ?: 'No detectada'); ?><br>
             AP MAC: <?php echo htmlspecialchars($ap_norm ?: 'No detectada'); ?><br>
-            Cliente IP: <?php echo htmlspecialchars($client_ip); ?><br>
-            Token: <?php echo htmlspecialchars($token ?: 'No enviado'); ?><br>
-            SSID: <?php echo htmlspecialchars($ssid ?: 'No enviado'); ?>
+            Cliente IP (Omada): <?php echo htmlspecialchars($clientIp_om ?: 'No enviado'); ?><br>
+            SSID: <?php echo htmlspecialchars(($ssidName ?: $ssid) ?: 'No enviado'); ?><br>
+            radioId: <?php echo htmlspecialchars($radioId); ?><br>
+            originUrl: <?php echo htmlspecialchars($originUrl ?: 'No enviado'); ?><br>
+            Token: <?php echo htmlspecialchars($token ?: 'No enviado'); ?>
         </div>
 
         <?php if ($mac_norm === ''): ?>
@@ -656,7 +719,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'])) {
             <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_norm); ?>">
             <input type="hidden" name="ap_ip" value="<?php echo htmlspecialchars($ap_ip); ?>">
             <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
-            <input type="hidden" name="ssid" value="<?php echo htmlspecialchars($ssid); ?>">
+            <input type="hidden" name="ssid" value="<?php echo htmlspecialchars($ssidName ?: $ssid); ?>">
 
             <button type="submit" id="submitBtn">🚀 Registrar y Conectar</button>
         </form>
