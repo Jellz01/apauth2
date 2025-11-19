@@ -43,7 +43,7 @@ services:
        - "1812:1812/udp"
        - "1813:1813/udp"
        - "3799:3799/udp"
-
+    command: ["/bin/sh", "/docker-entrypoint-initdb.d/start.sh"]
     
     networks:
       - backend

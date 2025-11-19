@@ -1,8 +1,21 @@
 #!/bin/bash
-set -ev
+set -e
+
+echo "Starting containers..."
 docker-compose up -d
-docker pull 2stacks/radtest
-# Wait for MySQL to bootstrap
-sleep 15
+
+echo "Waiting for services to be ready..."
+sleep 20
+
+echo "Container status:"
 docker-compose ps
-docker run -it --rm --network docker-freeradius_backend 2stacks/radtest radtest testing password freeradius 2 testing123
+
+echo "Testing RADIUS server..."
+
+# Test from within the FreeRADIUS container
+docker exec freeradiustp radtest testing password 127.0.0.1 0 testing123
+
+# Test from host to container
+docker run --rm --network=$(basename $(pwd))_backend 2stacks/radtest radtest testing password freeradius 0 testing123
+
+echo "Test completed successfully!"
