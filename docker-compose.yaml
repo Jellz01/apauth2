@@ -35,7 +35,7 @@ services:
       RADIUS_KEY: telecom 
     volumes:
       - ./FreeRadius/scripts:/docker-entrypoint-initdb.d:ro 
-     # - ./FreeRadius/etc/raddb/clients.conf:/etc/freeradius/3.0/clients.conf:ro
+      - ./FreeRadius/etc/raddb/clients.conf:/etc/freeradius/3.0/clients.conf:ro
       
     
     ports:
@@ -56,8 +56,8 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./web/tplink:/var/www/html
-      - ./web/tplink/php-upload.ini:/usr/local/etc/php/conf.d/php-upload.ini
+      - ./web/aruba:/var/www/html
+      - ./web/aruba/php-upload.ini:/usr/local/etc/php/conf.d/php-upload.ini
     environment:
       MYSQL_HOST: mysql
       MYSQL_USER: radius
