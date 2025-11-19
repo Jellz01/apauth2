@@ -25,6 +25,7 @@ services:
     #build: ./FreeRadius
     image: 2stacks/freeradius:latest
     container_name: freeradiustp
+    
     environment:
       DB_HOST: mysql
       DB_NAME: radius
