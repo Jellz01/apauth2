@@ -115,7 +115,7 @@ listen {
 	#	      If both A and AAAA records are returned
 	#	      for the host name, only the A record is used.
 	#
-	# ipv4addr = *
+	# ipv4addr = 192.168.0.5
 	# ipv6addr = *
 	ipaddr = *
 

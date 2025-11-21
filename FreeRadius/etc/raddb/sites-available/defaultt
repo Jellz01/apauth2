@@ -1,0 +1,61 @@
+server default {
+listen {
+    type = auth
+    ipaddr = 192.168.0.5
+    port = 1812
+    limit {
+        max_connections = 16
+        lifetime = 0
+        idle_timeout = 30
+    }
+}
+
+listen {
+    type = acct
+    ipaddr = 192.168.0.5
+    port = 1813
+    limit {
+        max_connections = 16
+        lifetime = 0
+        idle_timeout = 30
+    }
+}
+
+# Comment out or remove the IPv6 sections if not needed
+# listen {
+#     type = auth
+#     ipv6addr = ::
+#     port = 1812
+# }
+
+# listen {
+#     ipv6addr = ::
+#     port = 1813
+#     type = acct
+# }
+
+# ... keep the rest of your authorize, authenticate, etc. sections exactly as they are
+authorize {
+    # ... your existing authorize config
+}
+
+authenticate {
+    # ... your existing authenticate config  
+}
+
+preacct {
+    # ... your existing preacct config
+}
+
+accounting {
+    # ... your existing accounting config
+}
+
+session {
+    # ... your existing session config
+}
+
+post-auth {
+    # ... your existing post-auth config
+}
+}
