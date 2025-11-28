@@ -237,119 +237,170 @@ function omada_authorize_client(
     return true;
 }
 
-/** ============= Manejo POST (form) ============= */
+/** ============= Manejo POST (form y quick connect) ============= */
+
+$formShouldBeVisible = false; // por defecto oculto
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    error_log("📨 PROCESANDO FORMULARIO POST");
+    // ¿Es un quick connect? (NAVEGAR sin formulario)
+    if (isset($_POST['quick_connect']) && $_POST['quick_connect'] === '1') {
+        error_log("⚡ QUICK CONNECT SOLICITADO");
 
-    $nombre   = trim($_POST['nombre']   ?? '');
-    $apellido = trim($_POST['apellido'] ?? '');
-    $cedula   = preg_replace('/\D+/', '', $_POST['cedula'] ?? '');
-    $telefono = preg_replace('/\D+/', '', $_POST['telefono'] ?? '');
-    $email    = trim($_POST['email']    ?? '');
-    $terminos = isset($_POST['terminos']) ? 1 : 0;
+        $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
+        $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
+        $ssidName_post = $_POST['ssidName'] ?? $ssidName;
+        $radioId_post  = $_POST['radioId']  ?? $radioId;
+        $site_post     = $_POST['site']     ?? $site;
+        $redirect_url  = $_POST['redirect_url'] ?? $redirect_url;
 
-    // MAC/AP/SSID/SITE/REDIRECT desde hidden + GET
-    $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
-    $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
-    $ssidName_post = $_POST['ssidName'] ?? $ssidName;
-    $radioId_post  = $_POST['radioId']  ?? $radioId;
-    $site_post     = $_POST['site']     ?? $site;
-    $redirect_url  = $_POST['redirect_url'] ?? $redirect_url;
+        $mac_norm_q    = normalize_mac($mac_post_raw);
+        $ap_mac_norm_q = normalize_mac($ap_post_raw);
+        $ssidName      = $ssidName_post;
+        $radioId       = $radioId_post;
+        $site          = $site_post;
 
-    $mac_norm     = normalize_mac($mac_post_raw);
-    $ap_mac_norm  = normalize_mac($ap_post_raw);
-    $ssidName     = $ssidName_post;
-    $radioId      = $radioId_post;
-    $site         = $site_post;
-
-    // Validaciones (MAC solo interna)
-    if ($mac_norm === '' || strlen($mac_norm) !== 12) {
-        $errors['mac'] = 'No se pudo identificar correctamente tu dispositivo.';
-    }
-
-    if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
-    if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
-    if (!validarCedulaEC($cedula)) $errors['cedula'] = 'Cédula inválida.';
-    if (!validarTelefonoEC($telefono)) $errors['telefono'] = 'Teléfono inválido (09XXXXXXXX).';
-    if (!validarEmailReal($email)) $errors['email'] = 'Email inválido.';
-    if (!$terminos) $errors['terminos'] = 'Debes aceptar los términos.';
-
-    $hayErrores = array_filter($errors, fn($e) => $e !== '');
-
-    if (!$hayErrores) {
-        try {
-            $conn->begin_transaction();
-            error_log("🔄 INICIANDO TRANSACCIÓN");
-
-            // Insertar cliente en tu tabla
-            $stmt_clients = $conn->prepare("
-                INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-            ");
-            $stmt_clients->bind_param(
-                "sssssss",
-                $nombre,
-                $apellido,
-                $cedula,
-                $telefono,
-                $email,
-                $mac_norm,
-                $ap_mac_norm
-            );
-            $stmt_clients->execute();
-            $stmt_clients->close();
-            error_log("✅ CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
-
-            $conn->commit();
-            error_log("✅ TRANSACCIÓN COMPLETADA");
-
-            // 1) Login Hotspot API
+        if ($mac_norm_q === '' || strlen($mac_norm_q) !== 12) {
+            // Si falla MAC, mostramos error y dejamos el portal cargado
+            $errors['mac'] = 'No se pudo identificar tu dispositivo para conectar.';
+            $formShouldBeVisible = false; // sigue solo pantalla principal
+        } else {
+            // Quick connect: solo Omada, sin guardar datos personales
             if (!omada_hotspot_login()) {
-                error_log("⚠️ Omada hotspot login falló, redirigiendo igual");
-                if (!empty($redirect_url)) {
-                    header("Location: " . $redirect_url);
-                } else {
-                    header("Location: https://www.google.com");
-                }
-                exit;
+                error_log("⚠️ Omada hotspot login falló en QUICK CONNECT, redirigiendo igual");
+            } else {
+                omada_authorize_client(
+                    $mac_norm_q,
+                    $ap_mac_norm_q,
+                    $ssidName,
+                    $radioId,
+                    $site,
+                    120
+                );
             }
 
-            // 2) Autorizar cliente (por ejemplo 120 minutos)
-            omada_authorize_client(
-                $mac_norm,
-                $ap_mac_norm,
-                $ssidName,
-                $radioId,
-                $site,
-                120
-            );
-
-            // 3) Redirigir a la URL original
             if (!empty($redirect_url)) {
                 header("Location: " . $redirect_url);
             } else {
                 header("Location: https://www.google.com");
             }
             exit;
-
-        } catch (Exception $e) {
-            error_log("❌ ERROR: " . $e->getMessage());
-            $conn->rollback();
-            header('Content-Type: text/plain; charset=utf-8');
-            die('Error en registro');
         }
+
     } else {
-        // Mantener datos en el formulario
-        $_POST['nombre']   = $nombre;
-        $_POST['apellido'] = $apellido;
-        $_POST['cedula']   = $cedula;
-        $_POST['telefono'] = $telefono;
-        $_POST['email']    = $email;
+        // ---- FORMULARIO COMPLETO (REGISTRO) ----
+        error_log("📨 PROCESANDO FORMULARIO POST (REGISTRO)");
+
+        $nombre   = trim($_POST['nombre']   ?? '');
+        $apellido = trim($_POST['apellido'] ?? '');
+        $cedula   = preg_replace('/\D+/', '', $_POST['cedula'] ?? '');
+        $telefono = preg_replace('/\D+/', '', $_POST['telefono'] ?? '');
+        $email    = trim($_POST['email']    ?? '');
+        $terminos = isset($_POST['terminos']) ? 1 : 0;
+
+        // MAC/AP/SSID/SITE/REDIRECT desde hidden + GET
+        $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
+        $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
+        $ssidName_post = $_POST['ssidName'] ?? $ssidName;
+        $radioId_post  = $_POST['radioId']  ?? $radioId;
+        $site_post     = $_POST['site']     ?? $site;
+        $redirect_url  = $_POST['redirect_url'] ?? $redirect_url;
+
+        $mac_norm     = normalize_mac($mac_post_raw);
+        $ap_mac_norm  = normalize_mac($ap_post_raw);
+        $ssidName     = $ssidName_post;
+        $radioId      = $radioId_post;
+        $site         = $site_post;
+
+        // Validaciones
+        if ($mac_norm === '' || strlen($mac_norm) !== 12) {
+            $errors['mac'] = 'No se pudo identificar correctamente tu dispositivo.';
+        }
+
+        if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
+        if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
+        if (!validarCedulaEC($cedula)) $errors['cedula'] = 'Cédula inválida.';
+        if (!validarTelefonoEC($telefono)) $errors['telefono'] = 'Teléfono inválido (09XXXXXXXX).';
+        if (!validarEmailReal($email)) $errors['email'] = 'Email inválido.';
+        if (!$terminos) $errors['terminos'] = 'Debes aceptar los términos.';
+
+        $hayErrores = array_filter($errors, fn($e) => $e !== '');
+
+        // Si el usuario intentó enviar el formulario, lo mostramos
+        $formShouldBeVisible = true;
+
+        if (!$hayErrores) {
+            try {
+                $conn->begin_transaction();
+                error_log("🔄 INICIANDO TRANSACCIÓN");
+
+                // Insertar cliente en tu tabla
+                $stmt_clients = $conn->prepare("
+                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                ");
+                $stmt_clients->bind_param(
+                    "sssssss",
+                    $nombre,
+                    $apellido,
+                    $cedula,
+                    $telefono,
+                    $email,
+                    $mac_norm,
+                    $ap_mac_norm
+                );
+                $stmt_clients->execute();
+                $stmt_clients->close();
+                error_log("✅ CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
+
+                $conn->commit();
+                error_log("✅ TRANSACCIÓN COMPLETADA");
+
+                // 1) Login Hotspot API
+                if (!omada_hotspot_login()) {
+                    error_log("⚠️ Omada hotspot login falló, redirigiendo igual");
+                } else {
+                    // 2) Autorizar cliente (por ejemplo 120 minutos)
+                    omada_authorize_client(
+                        $mac_norm,
+                        $ap_mac_norm,
+                        $ssidName,
+                        $radioId,
+                        $site,
+                        120
+                    );
+                }
+
+                // 3) Redirigir a la URL original
+                if (!empty($redirect_url)) {
+                    header("Location: " . $redirect_url);
+                } else {
+                    header("Location: https://www.google.com");
+                }
+                exit;
+
+            } catch (Exception $e) {
+                error_log("❌ ERROR: " . $e->getMessage());
+                $conn->rollback();
+                header('Content-Type: text/plain; charset=utf-8');
+                die('Error en registro');
+            }
+        } else {
+            // Mantener datos en el formulario
+            $_POST['nombre']   = $nombre;
+            $_POST['apellido'] = $apellido;
+            $_POST['cedula']   = $cedula;
+            $_POST['telefono'] = $telefono;
+            $_POST['email']    = $email;
+        }
     }
 }
 
 /** ============= HTML (Portal) ============= */
+
+// Clases CSS según si el formulario debe estar visible o no
+$formPanelClass   = $formShouldBeVisible ? '' : 'hidden';
+$mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
+
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -704,7 +755,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <div class="overlay">
-        <div class="main-card full-left" id="main-card">
+        <div class="main-card <?php echo $mainCardExtraCls; ?>" id="main-card">
             <!-- LADO IZQUIERDO: BIENVENIDA / BOTONES / WHATSAPP -->
             <div class="welcome-side">
                 <img src="gonetlogo.png" alt="GoNet" class="logo">
@@ -723,8 +774,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </p>
 
                 <div class="btn-row">
-                    <!-- Este botón ahora SOLO muestra el formulario -->
-                    <button type="button" class="btn btn-primary" onclick="showForm();">
+                    <!-- QUICK CONNECT: conecta sin formulario -->
+                    <button type="button" class="btn btn-primary" onclick="document.getElementById('quick-connect-form').submit();">
                         NAVEGAR
                     </button>
 
@@ -751,10 +802,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         aplasta aquí
                     </button>.
                 </div>
+
+                <?php if (!empty($errors['mac'])): ?>
+                    <div class="error" style="margin-top:10px;">
+                        <?php echo htmlspecialchars($errors['mac']); ?>
+                    </div>
+                <?php endif; ?>
+
+                <!-- FORMULARIO OCULTO PARA QUICK CONNECT (SIN DATOS PERSONALES) -->
+                <form id="quick-connect-form" method="POST" class="hidden">
+                    <input type="hidden" name="quick_connect" value="1">
+                    <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
+                    <input type="hidden" name="ap_mac"       value="<?php echo htmlspecialchars($ap_raw); ?>">
+                    <input type="hidden" name="ip"           value="<?php echo htmlspecialchars($ip); ?>">
+                    <input type="hidden" name="ssidName"     value="<?php echo htmlspecialchars($ssidName); ?>">
+                    <input type="hidden" name="radioId"      value="<?php echo htmlspecialchars($radioId); ?>">
+                    <input type="hidden" name="site"         value="<?php echo htmlspecialchars($site); ?>">
+                    <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
+                </form>
             </div>
 
-            <!-- LADO DERECHO: FORMULARIO DE REGISTRO (OCULTO HASTA QUE DEN CLICK) -->
-            <div class="form-side hidden" id="form-panel">
+            <!-- LADO DERECHO: FORMULARIO DE REGISTRO (OPCIONAL, SOLO SI APRIETA "aplasta aquí") -->
+            <div class="form-side <?php echo $formPanelClass; ?>" id="form-panel">
                 <div class="form-title">Registro rápido</div>
                 <div class="form-subtitle">
                     Completa tus datos para activar tu acceso a Internet.
@@ -770,7 +839,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         Tu dispositivo está listo para ser registrado. Solo necesitamos algunos datos.
                     </div>
 
-                    <?php if (!empty($errors['mac'])): ?>
+                    <?php if (!empty($errors['mac']) && $formShouldBeVisible): ?>
                         <div class="error"><?php echo htmlspecialchars($errors['mac']); ?></div>
                     <?php endif; ?>
 
@@ -881,7 +950,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }, 5000); // cada 5 segundos
     })();
 
-    // Mostrar el formulario cuando se hace click en "NAVEGAR" o "aplasta aquí"
+    // Mostrar el formulario cuando se hace click en "aplasta aquí"
     function showForm() {
         const formPanel = document.getElementById('form-panel');
         const mainCard  = document.getElementById('main-card');
