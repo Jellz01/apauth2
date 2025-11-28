@@ -7,17 +7,18 @@ error_reporting(E_ALL);
 
 /* ============ CONFIG OMADA ============ */
 
-// IP o hostname del controller (ajusta si no es 10.0.0.10)
+// IP o hostname del controller
 const OMADA_CONTROLLER    = '10.0.0.10';
 const OMADA_PORT          = 8043;
 
-// IMPORTANTE: pon aquí el ID que ves en la URL de Omada después de /e/ 
-// Ej: https://10.0.0.10:8043/e/ABCDEF1234567890/#/site/jellz_Gonet/dashboard
-// => OMADA_CONTROLLER_ID = 'ABCDEF1234567890';
+// PON AQUÍ EL ID REAL (lo que sale después de /e/ en la URL del Omada)
 const OMADA_CONTROLLER_ID = 'PON_AQUI_TU_CONTROLLER_ID';
 
+// Usuario local del Omada (ya lo creaste)
 const OMADA_OP_USER       = 'portal-operator';
 const OMADA_OP_PASS       = 'S3cret!';
+
+// Nombre REAL del site (en tu caso)
 const OMADA_SITE          = 'jellz_Gonet';
 
 // Archivos temporales para cookies y token CSRF
@@ -76,17 +77,13 @@ mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 try {
     $conn = new mysqli($host, $user, $pass, $db);
     $conn->set_charset('utf8mb4');
-    error_log("✅ CONEXIÓN BD EXITOSA");
+    error_log("✅ BD: CONEXIÓN BD EXITOSA");
 } catch (Exception $e) {
-    error_log("❌ ERROR CONEXIÓN BD: " . $e->getMessage());
+    error_log("❌ BD: ERROR CONEXIÓN BD: " . $e->getMessage());
     die("<div class='error'>❌ Error de conexión</div>");
 }
 
 /** ============= Parámetros de entrada desde Omada ============= */
-/*
-   Omada (External Portal Server) manda algo tipo:
-   ?clientMac=...&clientIp=...&apMac=...&ssidName=...&radioId=0&site=jellz_Gonet&redirectUrl=...
-*/
 
 $mac_raw   = $_GET['clientMac']  ?? $_GET['mac'] ?? $_POST['mac'] ?? '';
 $ip_raw    = $_GET['clientIp']   ?? $_GET['ip']  ?? $_POST['ip']  ?? '';
@@ -102,7 +99,7 @@ $ap_mac_norm  = normalize_mac($ap_raw);
 $ip           = trim($ip_raw);
 $redirect_url = trim($redirect_url_raw);
 
-error_log("🔍 REQUEST - MAC: '$mac_norm', IP: '$ip', AP_MAC: '$ap_mac_norm', SSID: '$ssidName', SITE: '$site', REDIRECT: '$redirect_url'");
+error_log("🔍 REQUEST INICIAL - MAC: '$mac_norm', IP: '$ip', AP_MAC: '$ap_mac_norm', SSID: '$ssidName', SITE: '$site', REDIRECT: '$redirect_url'");
 
 $errors = [
     'mac'      => '',
@@ -133,6 +130,8 @@ function omada_hotspot_login(): bool {
         OMADA_CONTROLLER_ID
     );
 
+    error_log("🌐 OMADA LOGIN → URL: $url, USER: " . OMADA_OP_USER . ", SITE: " . OMADA_SITE);
+
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL            => $url,
@@ -151,26 +150,28 @@ function omada_hotspot_login(): bool {
 
     $res = curl_exec($ch);
     if ($res === false) {
-        error_log("❌ Omada hotspot login curl error: " . curl_error($ch));
+        error_log("❌ OMADA LOGIN CURL ERROR: " . curl_error($ch));
         curl_close($ch);
         return false;
     }
     curl_close($ch);
 
+    error_log("📥 OMADA LOGIN RESPUESTA RAW: $res");
+
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
-        error_log("❌ Omada hotspot login failed: $res");
+        error_log("❌ OMADA LOGIN FAILED, OBJ: " . print_r($obj, true));
         return false;
     }
 
     $token = $obj['result']['token'] ?? '';
     if ($token) {
         file_put_contents(OMADA_TOKEN_FILE, $token);
+        error_log("✅ OMADA LOGIN OK - TOKEN GUARDADO");
     } else {
-        error_log("⚠️ Omada login sin token CSRF en respuesta");
+        error_log("⚠️ OMADA LOGIN SIN TOKEN CSRF EN RESPUESTA");
     }
 
-    error_log("✅ Omada hotspot login OK");
     return true;
 }
 
@@ -212,6 +213,8 @@ function omada_authorize_client(
         OMADA_CONTROLLER_ID
     );
 
+    error_log("🌐 OMADA AUTH → URL: $url, DATA: " . json_encode($authInfo) . ", CSRF: " . substr($csrfToken, 0, 10) . "...");
+
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL            => $url,
@@ -227,19 +230,21 @@ function omada_authorize_client(
 
     $res = curl_exec($ch);
     if ($res === false) {
-        error_log("❌ Omada authorize curl error: " . curl_error($ch));
+        error_log("❌ OMADA AUTHORIZE CURL ERROR: " . curl_error($ch));
         curl_close($ch);
         return false;
     }
     curl_close($ch);
 
+    error_log("📥 OMADA AUTHORIZE RESPUESTA RAW: $res");
+
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
-        error_log("❌ Omada authorize failed: $res");
+        error_log("❌ OMADA AUTHORIZE FAILED, OBJ: " . print_r($obj, true));
         return false;
     }
 
-    error_log("✅ Omada authorize OK para $clientMac");
+    error_log("✅ OMADA AUTHORIZE OK PARA MAC: $clientMac");
     return true;
 }
 
@@ -248,9 +253,11 @@ function omada_authorize_client(
 $formShouldBeVisible = false; // por defecto oculto
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // ¿Es un quick connect? (NAVEGAR sin formulario)
+    error_log("📨 POST DETECTADO, POST DATA: " . print_r($_POST, true));
+
+    // QUICK CONNECT (NAVEGAR sin formulario)
     if (isset($_POST['quick_connect']) && $_POST['quick_connect'] === '1') {
-        error_log("⚡ QUICK CONNECT SOLICITADO");
+        error_log("⚡ QUICK CONNECT: INICIANDO");
 
         $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
         $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
@@ -265,16 +272,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $radioId       = $radioId_post;
         $site          = $site_post;
 
+        error_log("⚡ QUICK CONNECT DATA - MAC_NORM: $mac_norm_q, AP_MAC_NORM: $ap_mac_norm_q, SSID: $ssidName, RADIO: $radioId, SITE: $site, REDIRECT: $redirect_url");
+
         if ($mac_norm_q === '' || strlen($mac_norm_q) !== 12) {
-            // Si falla MAC, mostramos error y dejamos el portal cargado
             $errors['mac'] = 'No se pudo identificar tu dispositivo para conectar.';
-            $formShouldBeVisible = false; // sigue solo pantalla principal
+            $formShouldBeVisible = false;
+            error_log("⚠️ QUICK CONNECT: MAC INVÁLIDA, NO REDIRIGIMOS");
         } else {
             // Quick connect: solo Omada, sin guardar datos personales
-            if (!omada_hotspot_login()) {
-                error_log("⚠️ Omada hotspot login falló en QUICK CONNECT, redirigiendo igual");
+            $loginOk = omada_hotspot_login();
+            if (!$loginOk) {
+                error_log("⚠️ QUICK CONNECT: OMADA LOGIN FALLÓ, IGUAL REDIRIGIMOS SIN AUTH");
             } else {
-                omada_authorize_client(
+                $authOk = omada_authorize_client(
                     $mac_norm_q,
                     $ap_mac_norm_q,
                     $ssidName,
@@ -282,19 +292,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $site,
                     120
                 );
+                error_log("⚡ QUICK CONNECT: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
             }
 
             if (!empty($redirect_url)) {
+                error_log("➡️ QUICK CONNECT: REDIRECT A ORIGINAL: $redirect_url");
                 header("Location: " . $redirect_url);
             } else {
+                error_log("➡️ QUICK CONNECT: REDIRECT A GOOGLE");
                 header("Location: https://www.google.com");
             }
             exit;
         }
 
     } else {
-        // ---- FORMULARIO COMPLETO (REGISTRO) ----
-        error_log("📨 PROCESANDO FORMULARIO POST (REGISTRO)");
+        // FORMULARIO COMPLETO (REGISTRO)
+        error_log("📝 REGISTRO FORMULARIO: INICIANDO");
 
         $nombre   = trim($_POST['nombre']   ?? '');
         $apellido = trim($_POST['apellido'] ?? '');
@@ -303,7 +316,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email    = trim($_POST['email']    ?? '');
         $terminos = isset($_POST['terminos']) ? 1 : 0;
 
-        // MAC/AP/SSID/SITE/REDIRECT desde hidden + GET
         $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
         $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
         $ssidName_post = $_POST['ssidName'] ?? $ssidName;
@@ -317,11 +329,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $radioId      = $radioId_post;
         $site         = $site_post;
 
-        // Validaciones
+        error_log("📝 REGISTRO DATA - MAC_NORM: $mac_norm, AP_MAC_NORM: $ap_mac_norm, NOMBRE: $nombre, APELLIDO: $apellido, MAIL: $email");
+
         if ($mac_norm === '' || strlen($mac_norm) !== 12) {
             $errors['mac'] = 'No se pudo identificar correctamente tu dispositivo.';
         }
-
         if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
         if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
         if (!validarCedulaEC($cedula)) $errors['cedula'] = 'Cédula inválida.';
@@ -329,17 +341,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!validarEmailReal($email)) $errors['email'] = 'Email inválido.';
         if (!$terminos) $errors['terminos'] = 'Debes aceptar los términos.';
 
-        $hayErrores = array_filter($errors, fn($e) => $e !== '');
+        $hayErrores = array_filter($errors, function($e) {
+            return $e !== '';
+        });
 
-        // Si el usuario intentó enviar el formulario, lo mostramos
         $formShouldBeVisible = true;
 
         if (!$hayErrores) {
             try {
                 $conn->begin_transaction();
-                error_log("🔄 INICIANDO TRANSACCIÓN");
+                error_log("🔄 BD: INICIANDO TRANSACCIÓN REGISTRO");
 
-                // Insertar cliente en tu tabla
                 $stmt_clients = $conn->prepare("
                     INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)
@@ -356,17 +368,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $stmt_clients->execute();
                 $stmt_clients->close();
-                error_log("✅ CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
+                error_log("✅ BD: CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
 
                 $conn->commit();
-                error_log("✅ TRANSACCIÓN COMPLETADA");
+                error_log("✅ BD: TRANSACCIÓN COMPLETADA");
 
-                // 1) Login Hotspot API
-                if (!omada_hotspot_login()) {
-                    error_log("⚠️ Omada hotspot login falló, redirigiendo igual");
+                $loginOk = omada_hotspot_login();
+                if (!$loginOk) {
+                    error_log("⚠️ REGISTRO: OMADA LOGIN FALLÓ, REDIRIGIMOS SIN AUTH");
                 } else {
-                    // 2) Autorizar cliente (por ejemplo 120 minutos)
-                    omada_authorize_client(
+                    $authOk = omada_authorize_client(
                         $mac_norm,
                         $ap_mac_norm,
                         $ssidName,
@@ -374,24 +385,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $site,
                         120
                     );
+                    error_log("📝 REGISTRO: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
                 }
 
-                // 3) Redirigir a la URL original
                 if (!empty($redirect_url)) {
+                    error_log("➡️ REGISTRO: REDIRECT A ORIGINAL: $redirect_url");
                     header("Location: " . $redirect_url);
                 } else {
+                    error_log("➡️ REGISTRO: REDIRECT A GOOGLE");
                     header("Location: https://www.google.com");
                 }
                 exit;
 
             } catch (Exception $e) {
-                error_log("❌ ERROR: " . $e->getMessage());
+                error_log("❌ BD/REGISTRO: ERROR: " . $e->getMessage());
                 $conn->rollback();
                 header('Content-Type: text/plain; charset=utf-8');
                 die('Error en registro');
             }
         } else {
-            // Mantener datos en el formulario
+            error_log("⚠️ REGISTRO: VALIDACIÓN FALLÓ, ERRORES: " . print_r($errors, true));
             $_POST['nombre']   = $nombre;
             $_POST['apellido'] = $apellido;
             $_POST['cedula']   = $cedula;
@@ -403,7 +416,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 /** ============= HTML (Portal) ============= */
 
-// Clases CSS según si el formulario debe estar visible o no
 $formPanelClass   = $formShouldBeVisible ? '' : 'hidden';
 $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
 
@@ -434,7 +446,6 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
             overflow: hidden;
         }
 
-        /* SLIDER DE PROMOS */
         .promo-slider {
             position: absolute;
             inset: 0;
@@ -751,7 +762,7 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
 <body>
 <div class="page-wrapper">
 
-    <!-- SLIDER DE 5 PROMOS (CAMBIA LAS IMÁGENES A LAS TUYAS) -->
+    <!-- SLIDER DE 5 PROMOS -->
     <div class="promo-slider">
         <div class="promo-slide active" style="background-image: url('promo1.jpg');"></div>
         <div class="promo-slide" style="background-image: url('promo2.jpg');"></div>
@@ -762,7 +773,7 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
 
     <div class="overlay">
         <div class="main-card <?php echo $mainCardExtraCls; ?>" id="main-card">
-            <!-- LADO IZQUIERDO: BIENVENIDA / BOTONES / WHATSAPP -->
+            <!-- LADO IZQUIERDO -->
             <div class="welcome-side">
                 <img src="gonetlogo.png" alt="GoNet" class="logo">
 
@@ -780,12 +791,11 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
                 </p>
 
                 <div class="btn-row">
-                    <!-- QUICK CONNECT: conecta sin formulario -->
+                    <!-- QUICK CONNECT -->
                     <button type="button" class="btn btn-primary" onclick="document.getElementById('quick-connect-form').submit();">
                         NAVEGAR
                     </button>
 
-                    <!-- BOTÓN WHATSAPP (CAMBIA EL NÚMERO) -->
                     <a class="btn btn-secondary" href="https://wa.me/593900000000" target="_blank" rel="noopener">
                         Comunícate con nosotros
                     </a>
@@ -796,7 +806,6 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
                     <p>Si necesitas ayuda o quieres contratar nuestros servicios, estamos para ayudarte.</p>
                     <div class="whatsapp-list">
                         WhatsApp:
-                        <!-- CAMBIA ESTOS NÚMEROS A LOS REALES -->
                         <div><a href="https://wa.me/593900000001" target="_blank">+593 9 0000 0001</a></div>
                         <div><a href="https://wa.me/593900000002" target="_blank">+593 9 0000 0002</a></div>
                     </div>
@@ -815,7 +824,7 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
                     </div>
                 <?php endif; ?>
 
-                <!-- FORMULARIO OCULTO PARA QUICK CONNECT (SIN DATOS PERSONALES) -->
+                <!-- FORMULARIO OCULTO PARA QUICK CONNECT -->
                 <form id="quick-connect-form" method="POST" class="hidden">
                     <input type="hidden" name="quick_connect" value="1">
                     <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
@@ -828,7 +837,7 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
                 </form>
             </div>
 
-            <!-- LADO DERECHO: FORMULARIO DE REGISTRO (OPCIONAL, SOLO SI APRIETA "aplasta aquí") -->
+            <!-- LADO DERECHO: FORM REGISTRO -->
             <div class="form-side <?php echo $formPanelClass; ?>" id="form-panel">
                 <div class="form-title">Registro rápido</div>
                 <div class="form-subtitle">
@@ -916,7 +925,6 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
                             <?php endif; ?>
                         </div>
 
-                        <!-- Hidden: MAC/AP/SSID/SITE/REDIRECT -->
                         <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
                         <input type="hidden" name="ap_mac"       value="<?php echo htmlspecialchars($ap_raw); ?>">
                         <input type="hidden" name="ip"           value="<?php echo htmlspecialchars($ip); ?>">
@@ -938,32 +946,41 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
 </div>
 
 <script>
-    // Slider simple de 5 imágenes
+    // Slider simple de 5 imágenes (sin ES6 para máxima compatibilidad)
     (function() {
-        const slides = document.querySelectorAll('.promo-slide');
+        var slides = document.getElementsByClassName('promo-slide');
         if (!slides.length) return;
-        let current = 0;
+        var current = 0;
 
         function showSlide(index) {
-            slides.forEach((s, i) => {
-                s.classList.toggle('active', i === index);
-            });
+            for (var i = 0; i < slides.length; i++) {
+                if (i === index) {
+                    slides[i].classList.add('active');
+                } else {
+                    slides[i].classList.remove('active');
+                }
+            }
         }
 
-        setInterval(() => {
+        setInterval(function() {
             current = (current + 1) % slides.length;
             showSlide(current);
-        }, 5000); // cada 5 segundos
+        }, 5000);
     })();
 
     // Mostrar el formulario cuando se hace click en "aplasta aquí"
     function showForm() {
-        const formPanel = document.getElementById('form-panel');
-        const mainCard  = document.getElementById('main-card');
+        var formPanel = document.getElementById('form-panel');
+        var mainCard  = document.getElementById('main-card');
         if (formPanel && mainCard) {
             formPanel.classList.remove('hidden');
             mainCard.classList.remove('full-left');
-            formPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            try {
+                formPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (e) {
+                // por si el navegador no soporta scrollIntoView con opciones
+                formPanel.scrollIntoView();
+            }
         }
     }
 </script>
