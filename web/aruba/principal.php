@@ -5,6 +5,21 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+/* ============ CONFIG OMADA ============ */
+
+const OMADA_CONTROLLER    = '10.0.0.10';      // <-- CAMBIA ESTO
+const OMADA_PORT          = 8043;             // <-- CAMBIA SI USAS OTRO
+const OMADA_CONTROLLER_ID = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; // <-- CAMBIA ESTO
+const OMADA_OP_USER       = 'portal-operator'; // <-- CAMBIA ESTO
+const OMADA_OP_PASS       = 'S3cret!';         // <-- CAMBIA ESTO
+const OMADA_SITE          = 'Default';         // <-- CAMBIA SI TU SITE TIENE OTRO NOMBRE
+
+// Archivos temporales para cookies y token CSRF
+define('OMADA_COOKIE_FILE', sys_get_temp_dir() . '/omada_cookie.txt');
+define('OMADA_TOKEN_FILE',  sys_get_temp_dir() . '/omada_token.txt');
+
+/* ============ CONFIG BD ============ */
+
 $host = "mysql";
 $user = "radius";
 $pass = "radpass";
@@ -61,36 +76,27 @@ try {
     die("<div class='error'>❌ Error de conexión</div>");
 }
 
-/** ============= Parámetros de entrada (Omada + fallback) ============= */
+/** ============= Parámetros de entrada desde Omada ============= */
+/*
+   Omada (External Portal Server) manda algo tipo:
+   ?clientMac=...&clientIp=...&apMac=...&ssidName=...&radioId=0&site=Default&redirectUrl=...
+*/
 
-// Omada suele mandar: clientMac, clientIp, apMac, redirectUrl/originUrl
-$mac_raw  = $_GET['mac']
-         ?? $_GET['clientMac']
-         ?? $_GET['cid']
-         ?? $_POST['mac']
-         ?? '';
+$mac_raw   = $_GET['clientMac']  ?? $_GET['mac'] ?? $_POST['mac'] ?? '';
+$ip_raw    = $_GET['clientIp']   ?? $_GET['ip']  ?? $_POST['ip']  ?? '';
+$ap_raw    = $_GET['apMac']      ?? $_GET['ap']  ?? $_POST['ap_mac'] ?? '';
+$ssidName  = $_GET['ssidName']   ?? $_POST['ssidName']   ?? '';
+$radioId   = $_GET['radioId']    ?? $_POST['radioId']    ?? '0';
+$site      = $_GET['site']       ?? $_POST['site']       ?? OMADA_SITE;
 
-$ip_raw   = $_GET['ip']
-         ?? $_GET['clientIp']
-         ?? $_POST['ip']
-         ?? '';
+$redirect_url_raw = $_GET['redirectUrl'] ?? $_POST['redirect_url'] ?? '';
 
-$ap_raw   = $_GET['apMac']
-         ?? $_GET['ap']
-         ?? $_POST['ap_mac']
-         ?? '';
+$mac_norm     = normalize_mac($mac_raw);
+$ap_mac_norm  = normalize_mac($ap_raw);
+$ip           = trim($ip_raw);
+$redirect_url = trim($redirect_url_raw);
 
-$redirect_url_raw = $_GET['redirectUrl']
-                 ?? $_GET['originUrl']
-                 ?? $_POST['redirect_url']
-                 ?? '';
-
-$mac_norm      = normalize_mac($mac_raw);
-$ap_mac_norm   = normalize_mac($ap_raw);
-$ip            = trim($ip_raw);
-$redirect_url  = trim($redirect_url_raw);
-
-error_log("🔍 REQUEST - MAC: '$mac_norm', IP: '$ip', AP_MAC: '$ap_mac_norm', REDIRECT: '$redirect_url'");
+error_log("🔍 REQUEST - MAC: '$mac_norm', IP: '$ip', AP_MAC: '$ap_mac_norm', SSID: '$ssidName', SITE: '$site', REDIRECT: '$redirect_url'");
 
 $errors = [
     'mac'      => '',
@@ -102,27 +108,136 @@ $errors = [
     'terminos' => ''
 ];
 
-/** ============= Helper para responder OK a Omada ============= */
+/** ============= Helpers Omada API ============= */
 
-function responder_ok_y_salir(string $redirect_url = '') {
-    if (!empty($redirect_url)) {
-        header("Location: " . $redirect_url);
-        exit;
+function omada_hotspot_login(): bool {
+    @unlink(OMADA_COOKIE_FILE);
+    @unlink(OMADA_TOKEN_FILE);
+
+    $loginInfo = [
+        "name"     => OMADA_OP_USER,
+        "password" => OMADA_OP_PASS,
+        "site"     => OMADA_SITE, // algunos ejemplos no lo ponen, pero no estorba
+    ];
+
+    $url = sprintf(
+        "https://%s:%d/%s/api/v2/hotspot/login",
+        OMADA_CONTROLLER,
+        OMADA_PORT,
+        OMADA_CONTROLLER_ID
+    );
+
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL            => $url,
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_COOKIEJAR      => OMADA_COOKIE_FILE,
+        CURLOPT_COOKIEFILE     => OMADA_COOKIE_FILE,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER     => [
+            "Content-Type: application/json",
+            "Accept: application/json",
+        ],
+        CURLOPT_POSTFIELDS     => json_encode($loginInfo),
+    ]);
+
+    $res = curl_exec($ch);
+    if ($res === false) {
+        error_log("❌ Omada hotspot login curl error: " . curl_error($ch));
+        curl_close($ch);
+        return false;
+    }
+    curl_close($ch);
+
+    $obj = json_decode($res, true);
+    if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
+        error_log("❌ Omada hotspot login failed: $res");
+        return false;
     }
 
-    header('Content-Type: text/html; charset=utf-8');
-    echo "<!DOCTYPE html>
-<html lang='es'>
-<head><meta charset='UTF-8'><title>Registro Wi-Fi</title></head>
-<body style='font-family: Arial, sans-serif; text-align:center; padding:40px;'>
-    <h2>✅ Registro completado</h2>
-    <p>Ya puedes navegar en Internet.</p>
-</body>
-</html>";
-    exit;
+    $token = $obj['result']['token'] ?? '';
+    if ($token) {
+        file_put_contents(OMADA_TOKEN_FILE, $token);
+    } else {
+        error_log("⚠️ Omada login sin token CSRF en respuesta");
+    }
+
+    error_log("✅ Omada hotspot login OK");
+    return true;
 }
 
-/** ============= Manejo POST ============= */
+function omada_authorize_client(
+    string $clientMac,
+    string $apMac,
+    string $ssidName,
+    string $radioId,
+    string $site,
+    int $minutes = 120
+): bool {
+
+    $milliseconds = $minutes * 60 * 1000;
+
+    $authInfo = [
+        'clientMac' => $clientMac,
+        'apMac'     => $apMac,
+        'ssidName'  => $ssidName,
+        'radioId'   => $radioId,
+        'site'      => $site,
+        'time'      => $milliseconds,
+        'authType'  => 4, // External Portal auth
+    ];
+
+    $csrfToken = @file_get_contents(OMADA_TOKEN_FILE) ?: '';
+
+    $headers = [
+        "Content-Type: application/json",
+        "Accept: application/json",
+    ];
+    if ($csrfToken !== '') {
+        $headers[] = "Csrf-Token: " . $csrfToken;
+    }
+
+    $url = sprintf(
+        "https://%s:%d/%s/api/v2/hotspot/extPortal/auth",
+        OMADA_CONTROLLER,
+        OMADA_PORT,
+        OMADA_CONTROLLER_ID
+    );
+
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL            => $url,
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_COOKIEJAR      => OMADA_COOKIE_FILE,
+        CURLOPT_COOKIEFILE     => OMADA_COOKIE_FILE,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER     => $headers,
+        CURLOPT_POSTFIELDS     => json_encode($authInfo),
+    ]);
+
+    $res = curl_exec($ch);
+    if ($res === false) {
+        error_log("❌ Omada authorize curl error: " . curl_error($ch));
+        curl_close($ch);
+        return false;
+    }
+    curl_close($ch);
+
+    $obj = json_decode($res, true);
+    if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
+        error_log("❌ Omada authorize failed: $res");
+        return false;
+    }
+
+    error_log("✅ Omada authorize OK para $clientMac");
+    return true;
+}
+
+/** ============= Manejo POST (form) ============= */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     error_log("📨 PROCESANDO FORMULARIO POST");
@@ -134,14 +249,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim($_POST['email']    ?? '');
     $terminos = isset($_POST['terminos']) ? 1 : 0;
 
-    // MAC y AP MAC desde campos ocultos
-    $mac_post_raw = $_POST['mac']    ?? '';
-    $ap_post_raw  = $_POST['ap_mac'] ?? '';
+    // MAC/AP/SSID/SITE/REDIRECT desde hidden + GET
+    $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
+    $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
+    $ssidName_post = $_POST['ssidName'] ?? $ssidName;
+    $radioId_post  = $_POST['radioId']  ?? $radioId;
+    $site_post     = $_POST['site']     ?? $site;
+    $redirect_url  = $_POST['redirect_url'] ?? $redirect_url;
 
-    $mac_norm    = normalize_mac($mac_post_raw);
-    $ap_mac_norm = normalize_mac($ap_post_raw);
+    $mac_norm     = normalize_mac($mac_post_raw);
+    $ap_mac_norm  = normalize_mac($ap_post_raw);
+    $ssidName     = $ssidName_post;
+    $radioId      = $radioId_post;
+    $site         = $site_post;
 
-    // Validaciones (MAC solo a nivel interno, sin mostrar al usuario)
+    // Validaciones (MAC solo interna)
     if ($mac_norm === '' || strlen($mac_norm) !== 12) {
         $errors['mac'] = 'No se pudo identificar correctamente tu dispositivo.';
     }
@@ -160,27 +282,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conn->begin_transaction();
             error_log("🔄 INICIANDO TRANSACCIÓN");
 
-            // Verificar si ya existe en radcheck
-            $check_radcheck = $conn->prepare("
-                SELECT id FROM radcheck 
-                WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
-            ");
-            $check_radcheck->bind_param("s", $mac_norm);
-            $check_radcheck->execute();
-            $check_radcheck->store_result();
-
-            if ($check_radcheck->num_rows > 0) {
-                $check_radcheck->close();
-                $conn->commit();
-                error_log("✅ MAC ya estaba registrada (POST): $mac_norm");
-                responder_ok_y_salir($redirect_url);
-            }
-            $check_radcheck->close();
-
-            // Insertar cliente
+            // Insertar cliente en tu tabla
             $stmt_clients = $conn->prepare("
-                INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, enabled, ap_mac)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
             ");
             $stmt_clients->bind_param(
                 "sssssss",
@@ -196,37 +301,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt_clients->close();
             error_log("✅ CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
 
-            // Insertar en radcheck para RADIUS
-            $stmt_radcheck = $conn->prepare("
-                INSERT INTO radcheck (username, attribute, op, value)
-                VALUES (?, 'Auth-Type', ':=', 'Accept')
-            ");
-            $stmt_radcheck->bind_param("s", $mac_norm);
-            $stmt_radcheck->execute();
-            $stmt_radcheck->close();
-            error_log("✅ RADCHECK INSERTADO - MAC: $mac_norm");
-
             $conn->commit();
             error_log("✅ TRANSACCIÓN COMPLETADA");
 
-            responder_ok_y_salir($redirect_url);
+            // === AHORA: LLAMAR A OMADA PARA AUTORIZAR DISPOSITIVO ===
+
+            // 1) Login Hotspot API
+            if (!omada_hotspot_login()) {
+                error_log("⚠️ Omada hotspot login falló, redirigiendo igual");
+                if (!empty($redirect_url)) {
+                    header("Location: " . $redirect_url);
+                } else {
+                    header("Location: https://www.google.com");
+                }
+                exit;
+            }
+
+            // 2) Autorizar cliente (por ejemplo 120 minutos)
+            omada_authorize_client(
+                $mac_norm,
+                $ap_mac_norm,
+                $ssidName,
+                $radioId,
+                $site,
+                120
+            );
+
+            // 3) Redirigir a la URL original que el user quería
+            if (!empty($redirect_url)) {
+                header("Location: " . $redirect_url);
+            } else {
+                header("Location: https://www.google.com");
+            }
+            exit;
 
         } catch (Exception $e) {
             error_log("❌ ERROR: " . $e->getMessage());
-            
-            if ($conn->errno == 1062) {
-                // Duplicado - ya existe
-                error_log("ℹ️ MAC duplicada (ya estaba registrada)");
-                responder_ok_y_salir($redirect_url);
-            } else {
-                $conn->rollback();
-                error_log("❌ Transacción revertida");
-                header('Content-Type: text/plain; charset=utf-8');
-                die('Error en registro');
-            }
+            $conn->rollback();
+            header('Content-Type: text/plain; charset=utf-8');
+            die('Error en registro');
         }
     } else {
-        // Validación fallida - mantener datos en el formulario
+        // Mantener datos en el formulario
         $_POST['nombre']   = $nombre;
         $_POST['apellido'] = $apellido;
         $_POST['cedula']   = $cedula;
@@ -235,31 +351,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-/** ============= Verificar estado de MAC (auto-login Omada) ============= */
-
-$mac_already_registered = false;
-if ($mac_norm !== '' && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    try {
-        $check = $conn->prepare("
-            SELECT id FROM radcheck 
-            WHERE username = ? AND attribute = 'Auth-Type' AND op = ':=' AND value = 'Accept'
-        ");
-        $check->bind_param("s", $mac_norm);
-        $check->execute();
-        $check->store_result();
-        
-        if ($check->num_rows > 0) {
-            $mac_already_registered = true;
-            error_log("ℹ️ MAC ya registrada (GET), auto-login");
-            $check->close();
-            responder_ok_y_salir($redirect_url);
-        }
-        $check->close();
-    } catch (Exception $e) {
-        error_log("⚠️ Error verificando MAC: " . $e->getMessage());
-    }
-}
-
+/** ============= HTML (Portal) ============= */
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -408,10 +500,13 @@ if ($mac_norm !== '' && $_SERVER['REQUEST_METHOD'] === 'GET') {
                     <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo $errors['terminos']; ?></div><?php endif; ?>
                 </div>
 
-                <!-- Hidden: el usuario no ve MAC ni AP ni redirect -->
-                <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
-                <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_raw); ?>">
-                <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
+                <!-- Hidden: el usuario no ve MAC/AP/SSID/SITE/REDIRECT -->
+                <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
+                <input type="hidden" name="ap_mac"       value="<?php echo htmlspecialchars($ap_raw); ?>">
+                <input type="hidden" name="ip"           value="<?php echo htmlspecialchars($ip); ?>">
+                <input type="hidden" name="ssidName"     value="<?php echo htmlspecialchars($ssidName); ?>">
+                <input type="hidden" name="radioId"      value="<?php echo htmlspecialchars($radioId); ?>">
+                <input type="hidden" name="site"         value="<?php echo htmlspecialchars($site); ?>">
                 <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
 
                 <button type="submit">🚀 Conectar a Internet</button>
