@@ -7,12 +7,18 @@ error_reporting(E_ALL);
 
 /* ============ CONFIG OMADA ============ */
 
-const OMADA_CONTROLLER    = '10.0.0.10';      // <-- CAMBIA ESTO
-const OMADA_PORT          = 8043;             // <-- CAMBIA SI USAS OTRO
-const OMADA_CONTROLLER_ID = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; // <-- CAMBIA ESTO
-const OMADA_OP_USER       = 'portal-operator'; // <-- CAMBIA ESTO
-const OMADA_OP_PASS       = 'S3cret!';         // <-- CAMBIA ESTO
-const OMADA_SITE          = 'Default';         // <-- CAMBIA SI TU SITE TIENE OTRO NOMBRE
+// IP o hostname del controller (ajusta si no es 10.0.0.10)
+const OMADA_CONTROLLER    = '10.0.0.10';
+const OMADA_PORT          = 8043;
+
+// IMPORTANTE: pon aquí el ID que ves en la URL de Omada después de /e/ 
+// Ej: https://10.0.0.10:8043/e/ABCDEF1234567890/#/site/jellz_Gonet/dashboard
+// => OMADA_CONTROLLER_ID = 'ABCDEF1234567890';
+const OMADA_CONTROLLER_ID = 'PON_AQUI_TU_CONTROLLER_ID';
+
+const OMADA_OP_USER       = 'portal-operator';
+const OMADA_OP_PASS       = 'S3cret!';
+const OMADA_SITE          = 'jellz_Gonet';
 
 // Archivos temporales para cookies y token CSRF
 define('OMADA_COOKIE_FILE', sys_get_temp_dir() . '/omada_cookie.txt');
@@ -79,7 +85,7 @@ try {
 /** ============= Parámetros de entrada desde Omada ============= */
 /*
    Omada (External Portal Server) manda algo tipo:
-   ?clientMac=...&clientIp=...&apMac=...&ssidName=...&radioId=0&site=Default&redirectUrl=...
+   ?clientMac=...&clientIp=...&apMac=...&ssidName=...&radioId=0&site=jellz_Gonet&redirectUrl=...
 */
 
 $mac_raw   = $_GET['clientMac']  ?? $_GET['mac'] ?? $_POST['mac'] ?? '';
