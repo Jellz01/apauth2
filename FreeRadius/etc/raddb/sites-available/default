@@ -115,7 +115,7 @@ listen {
 	#	      If both A and AAAA records are returned
 	#	      for the host name, only the A record is used.
 	#
-	# ipv4addr = *
+	# ipv4addr = 192.168.0.5
 	# ipv6addr = *
 	ipaddr = *
 
@@ -123,7 +123,7 @@ listen {
 	#  Allowed values are:
 	#	integer port number (1812)
 	#	0 means "use /etc/services for the proper port"
-	port = 0
+	port = 1812
 
 	#  Some systems support binding to an interface, in addition
 	#  to the IP address.  This feature isn't strictly necessary,
@@ -193,7 +193,7 @@ listen {
 listen {
 	ipaddr = *
 #	ipv6addr = ::
-	port = 0
+	port = 1813
 	type = acct
 #	interface = eth0
 #	clients = per_socket_clients
@@ -234,7 +234,7 @@ listen {
 listen {
 	type = auth
 	ipv6addr = ::	# any.  ::1 == localhost
-	port = 0
+	port = 1812
 #	interface = eth0
 #	clients = per_socket_clients
 	limit {
@@ -246,7 +246,7 @@ listen {
 
 listen {
 	ipv6addr = ::
-	port = 0
+	port = 1813
 	type = acct
 #	interface = eth0
 #	clients = per_socket_clients
@@ -836,137 +836,4 @@ post-auth {
 	#  This attribute is never put into a request or reply packet.
 	#
 	#  Uncomment the next few lines to copy the required data into
-	#  the EAP-Key-Name attribute
-#	if (&reply:EAP-Session-Id) {
-#		update reply {
-#			EAP-Key-Name := &reply:EAP-Session-Id
-#		}
-#	}
-
-	#  Remove reply message if the response contains an EAP-Message
-	remove_reply_message_if_eap
-
 	#
-	#  Access-Reject packets are sent through the REJECT sub-section of the
-	#  post-auth section.
-	#
-	#  Add the ldap module name (or instance) if you have set
-	#  'edir_account_policy_check = yes' in the ldap module configuration
-	#
-	#  The "session-state" attributes are not available here.
-	#
-	Post-Auth-Type REJECT {
-		# log failed authentications in SQL, too.
-		#-sql
-
-        if ( $ENV{RAD_DEBUG} == "yes" ) {
-	        sql
-        }
-
-		attr_filter.access_reject
-
-		# Insert EAP-Failure message if the request was
-		# rejected by policy instead of because of an
-		# authentication failure
-		eap
-
-		#  Remove reply message if the response contains an EAP-Message
-		remove_reply_message_if_eap
-	}
-
-	#
-	#  Filter access challenges.
-	#
-	Post-Auth-Type Challenge {
-#		remove_reply_message_if_eap
-#		attr_filter.access_challenge.post-auth
-	}
-
-}
-
-#
-#  When the server decides to proxy a request to a home server,
-#  the proxied request is first passed through the pre-proxy
-#  stage.  This stage can re-write the request, or decide to
-#  cancel the proxy.
-#
-#  Only a few modules currently have this method.
-#
-pre-proxy {
-	# Before proxing the request add an Operator-Name attribute identifying
-	# if the operator-name is found for this client.
-	# No need to uncomment this if you have already enabled this in
-	# the authorize section.
-#	operator-name
-
-	#  The client requests the CUI by sending a CUI attribute
-	#  containing one zero byte.
-	#  Uncomment the line below if *requesting* the CUI.
-#	cui
-
-	#  Uncomment the following line if you want to change attributes
-	#  as defined in the preproxy_users file.
-#	files
-
-	#  Uncomment the following line if you want to filter requests
-	#  sent to remote servers based on the rules defined in the
-	#  'attrs.pre-proxy' file.
-#	attr_filter.pre-proxy
-
-	#  If you want to have a log of packets proxied to a home
-	#  server, un-comment the following line, and the
-	#  'detail pre_proxy_log' section, above.
-#	pre_proxy_log
-}
-
-#
-#  When the server receives a reply to a request it proxied
-#  to a home server, the request may be massaged here, in the
-#  post-proxy stage.
-#
-post-proxy {
-
-	#  If you want to have a log of replies from a home server,
-	#  un-comment the following line, and the 'detail post_proxy_log'
-	#  section, above.
-#	post_proxy_log
-
-	#  Uncomment the following line if you want to filter replies from
-	#  remote proxies based on the rules defined in the 'attrs' file.
-#	attr_filter.post-proxy
-
-	#
-	#  If you are proxying LEAP, you MUST configure the EAP
-	#  module, and you MUST list it here, in the post-proxy
-	#  stage.
-	#
-	#  You MUST also use the 'nostrip' option in the 'realm'
-	#  configuration.  Otherwise, the User-Name attribute
-	#  in the proxied request will not match the user name
-	#  hidden inside of the EAP packet, and the end server will
-	#  reject the EAP request.
-	#
-	eap
-
-	#
-	#  If the server tries to proxy a request and fails, then the
-	#  request is processed through the modules in this section.
-	#
-	#  The main use of this section is to permit robust proxying
-	#  of accounting packets.  The server can be configured to
-	#  proxy accounting packets as part of normal processing.
-	#  Then, if the home server goes down, accounting packets can
-	#  be logged to a local "detail" file, for processing with
-	#  radrelay.  When the home server comes back up, radrelay
-	#  will read the detail file, and send the packets to the
-	#  home server.
-	#
-	#  With this configuration, the server always responds to
-	#  Accounting-Requests from the NAS, but only writes
-	#  accounting packets to disk if the home server is down.
-	#
-#	Post-Proxy-Type Fail-Accounting {
-#			detail
-#	}
-}
-}

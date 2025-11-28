@@ -25,9 +25,6 @@ ENV DB_NAME=radius
 ENV RAD_DEBUG=yes
 
 ADD --chown=root:radius ./etc/raddb/ /etc/raddb
-RUN /etc/raddb/certs/bootstrap && \
-    chown -R root:radius /etc/raddb/certs && \
-    chmod 640 /etc/raddb/certs/*.pem
 
 ADD ./scripts/start.sh /start.sh
 ADD ./scripts/wait-for.sh /wait-for.sh
