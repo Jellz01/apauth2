@@ -5,33 +5,20 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-/* ============ MODO DEBUG ============ */
-const DEBUG_MODE = true;  // pon a false si ya no quieres ver el recuadro debug
-$debugSteps = [];
-
-/* Helper para log + debug visible */
-function add_debug($msg) {
-    global $debugSteps;
-    $stamp = date('H:i:s');
-    $line = "[$stamp] $msg";
-    $debugSteps[] = $line;
-    error_log($line);
-}
-
 /* ============ CONFIG OMADA ============ */
 
-// IP o hostname del controller (LAN del Omada)
+// IP o hostname del controller
 const OMADA_CONTROLLER    = '10.0.0.10';
 const OMADA_PORT          = 8043;
 
-// PON AQUÍ EL ID REAL (lo que sale en la URL: https://10.0.0.10:8043/e/XXXXXXXX/#/...)
+// PON AQUÍ EL ID REAL (lo que sale después de /e/ en la URL del Omada)
 const OMADA_CONTROLLER_ID = 'PON_AQUI_TU_CONTROLLER_ID';
 
 // Usuario local del Omada (ya lo creaste)
 const OMADA_OP_USER       = 'portal-operator';
 const OMADA_OP_PASS       = 'S3cret!';
 
-// Nombre REAL del site (en tu captura: jellz_Gonet)
+// Nombre REAL del site (en tu caso)
 const OMADA_SITE          = 'jellz_Gonet';
 
 // Archivos temporales para cookies y token CSRF
@@ -90,10 +77,10 @@ mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 try {
     $conn = new mysqli($host, $user, $pass, $db);
     $conn->set_charset('utf8mb4');
-    add_debug("✅ BD: CONEXIÓN BD EXITOSA");
+    error_log("✅ BD: CONEXIÓN BD EXITOSA");
 } catch (Exception $e) {
-    add_debug("❌ BD: ERROR CONEXIÓN BD: " . $e->getMessage());
-    die("<div class='error'>❌ Error de conexión BD</div>");
+    error_log("❌ BD: ERROR CONEXIÓN BD: " . $e->getMessage());
+    die("<div class='error'>❌ Error de conexión</div>");
 }
 
 /** ============= Parámetros de entrada desde Omada ============= */
@@ -112,7 +99,7 @@ $ap_mac_norm  = normalize_mac($ap_raw);
 $ip           = trim($ip_raw);
 $redirect_url = trim($redirect_url_raw);
 
-add_debug("🔍 REQUEST INICIAL - MAC: '$mac_norm', IP: '$ip', AP_MAC: '$ap_mac_norm', SSID: '$ssidName', SITE: '$site', REDIRECT: '$redirect_url'");
+error_log("🔍 REQUEST INICIAL - MAC: '$mac_norm', IP: '$ip', AP_MAC: '$ap_mac_norm', SSID: '$ssidName', SITE: '$site', REDIRECT: '$redirect_url'");
 
 $errors = [
     'mac'      => '',
@@ -123,9 +110,6 @@ $errors = [
     'email'    => '',
     'terminos' => ''
 ];
-
-$lastAction  = 'none';
-$authStatus  = '';
 
 /** ============= Helpers Omada API ============= */
 
@@ -146,7 +130,7 @@ function omada_hotspot_login(): bool {
         OMADA_CONTROLLER_ID
     );
 
-    add_debug("🌐 OMADA LOGIN → URL: $url, USER: " . OMADA_OP_USER . ", SITE: " . OMADA_SITE);
+    error_log("🌐 OMADA LOGIN → URL: $url, USER: " . OMADA_OP_USER . ", SITE: " . OMADA_SITE);
 
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -166,26 +150,26 @@ function omada_hotspot_login(): bool {
 
     $res = curl_exec($ch);
     if ($res === false) {
-        add_debug("❌ OMADA LOGIN CURL ERROR: " . curl_error($ch));
+        error_log("❌ OMADA LOGIN CURL ERROR: " . curl_error($ch));
         curl_close($ch);
         return false;
     }
     curl_close($ch);
 
-    add_debug("📥 OMADA LOGIN RESPUESTA RAW: $res");
+    error_log("📥 OMADA LOGIN RESPUESTA RAW: $res");
 
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
-        add_debug("❌ OMADA LOGIN FAILED, OBJ: " . print_r($obj, true));
+        error_log("❌ OMADA LOGIN FAILED, OBJ: " . print_r($obj, true));
         return false;
     }
 
     $token = $obj['result']['token'] ?? '';
     if ($token) {
         file_put_contents(OMADA_TOKEN_FILE, $token);
-        add_debug("✅ OMADA LOGIN OK - TOKEN GUARDADO");
+        error_log("✅ OMADA LOGIN OK - TOKEN GUARDADO");
     } else {
-        add_debug("⚠️ OMADA LOGIN SIN TOKEN CSRF EN RESPUESTA");
+        error_log("⚠️ OMADA LOGIN SIN TOKEN CSRF EN RESPUESTA");
     }
 
     return true;
@@ -229,7 +213,7 @@ function omada_authorize_client(
         OMADA_CONTROLLER_ID
     );
 
-    add_debug("🌐 OMADA AUTH → URL: $url, DATA: " . json_encode($authInfo) . ", CSRF: " . substr($csrfToken, 0, 10) . "...");
+    error_log("🌐 OMADA AUTH → URL: $url, DATA: " . json_encode($authInfo) . ", CSRF: " . substr($csrfToken, 0, 10) . "...");
 
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -246,21 +230,21 @@ function omada_authorize_client(
 
     $res = curl_exec($ch);
     if ($res === false) {
-        add_debug("❌ OMADA AUTHORIZE CURL ERROR: " . curl_error($ch));
+        error_log("❌ OMADA AUTHORIZE CURL ERROR: " . curl_error($ch));
         curl_close($ch);
         return false;
     }
     curl_close($ch);
 
-    add_debug("📥 OMADA AUTHORIZE RESPUESTA RAW: $res");
+    error_log("📥 OMADA AUTHORIZE RESPUESTA RAW: $res");
 
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
-        add_debug("❌ OMADA AUTHORIZE FAILED, OBJ: " . print_r($obj, true));
+        error_log("❌ OMADA AUTHORIZE FAILED, OBJ: " . print_r($obj, true));
         return false;
     }
 
-    add_debug("✅ OMADA AUTHORIZE OK PARA MAC: $clientMac");
+    error_log("✅ OMADA AUTHORIZE OK PARA MAC: $clientMac");
     return true;
 }
 
@@ -269,12 +253,11 @@ function omada_authorize_client(
 $formShouldBeVisible = false; // por defecto oculto
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    add_debug("📨 POST DETECTADO, POST DATA: " . print_r($_POST, true));
+    error_log("📨 POST DETECTADO, POST DATA: " . print_r($_POST, true));
 
     // QUICK CONNECT (NAVEGAR sin formulario)
     if (isset($_POST['quick_connect']) && $_POST['quick_connect'] === '1') {
-        $lastAction = 'quick_connect';
-        add_debug("⚡ QUICK CONNECT: INICIANDO");
+        error_log("⚡ QUICK CONNECT: INICIANDO");
 
         $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
         $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
@@ -289,18 +272,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $radioId       = $radioId_post;
         $site          = $site_post;
 
-        add_debug("⚡ QUICK CONNECT DATA - MAC_NORM: $mac_norm_q, AP_MAC_NORM: $ap_mac_norm_q, SSID: $ssidName, RADIO: $radioId, SITE: $site, REDIRECT: $redirect_url");
+        error_log("⚡ QUICK CONNECT DATA - MAC_NORM: $mac_norm_q, AP_MAC_NORM: $ap_mac_norm_q, SSID: $ssidName, RADIO: $radioId, SITE: $site, REDIRECT: $redirect_url");
 
         if ($mac_norm_q === '' || strlen($mac_norm_q) !== 12) {
             $errors['mac'] = 'No se pudo identificar tu dispositivo para conectar.';
             $formShouldBeVisible = false;
-            add_debug("⚠️ QUICK CONNECT: MAC INVÁLIDA, NO REDIRIGIMOS");
+            error_log("⚠️ QUICK CONNECT: MAC INVÁLIDA, NO REDIRIGIMOS");
         } else {
+            // Quick connect: solo Omada, sin guardar datos personales
             $loginOk = omada_hotspot_login();
-            $authStatus .= 'login=' . ($loginOk ? 'ok' : 'fail') . ';';
-
             if (!$loginOk) {
-                add_debug("⚠️ QUICK CONNECT: OMADA LOGIN FALLÓ, IGUAL INTENTAREMOS REDIRIGIR");
+                error_log("⚠️ QUICK CONNECT: OMADA LOGIN FALLÓ, IGUAL REDIRIGIMOS SIN AUTH");
             } else {
                 $authOk = omada_authorize_client(
                     $mac_norm_q,
@@ -310,24 +292,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $site,
                     120
                 );
-                $authStatus .= 'auth=' . ($authOk ? 'ok' : 'fail') . ';';
-                add_debug("⚡ QUICK CONNECT: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
+                error_log("⚡ QUICK CONNECT: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
             }
 
             if (!empty($redirect_url)) {
-                add_debug("➡️ QUICK CONNECT: REDIRECT A ORIGINAL: $redirect_url");
+                error_log("➡️ QUICK CONNECT: REDIRECT A ORIGINAL: $redirect_url");
                 header("Location: " . $redirect_url);
             } else {
-                add_debug("➡️ QUICK CONNECT: REDIRECT A GOOGLE");
-                header("Location: "://www.google.com");
+                error_log("➡️ QUICK CONNECT: REDIRECT A GOOGLE");
+                header("Location: https://www.google.com");
             }
             exit;
         }
 
     } else {
         // FORMULARIO COMPLETO (REGISTRO)
-        $lastAction = 'form_register';
-        add_debug("📝 REGISTRO FORMULARIO: INICIANDO");
+        error_log("📝 REGISTRO FORMULARIO: INICIANDO");
 
         $nombre   = trim($_POST['nombre']   ?? '');
         $apellido = trim($_POST['apellido'] ?? '');
@@ -349,7 +329,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $radioId      = $radioId_post;
         $site         = $site_post;
 
-        add_debug("📝 REGISTRO DATA - MAC_NORM: $mac_norm, AP_MAC_NORM: $ap_mac_norm, NOMBRE: $nombre, APELLIDO: $apellido, MAIL: $email");
+        error_log("📝 REGISTRO DATA - MAC_NORM: $mac_norm, AP_MAC_NORM: $ap_mac_norm, NOMBRE: $nombre, APELLIDO: $apellido, MAIL: $email");
 
         if ($mac_norm === '' || strlen($mac_norm) !== 12) {
             $errors['mac'] = 'No se pudo identificar correctamente tu dispositivo.';
@@ -370,7 +350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$hayErrores) {
             try {
                 $conn->begin_transaction();
-                add_debug("🔄 BD: INICIANDO TRANSACCIÓN REGISTRO");
+                error_log("🔄 BD: INICIANDO TRANSACCIÓN REGISTRO");
 
                 $stmt_clients = $conn->prepare("
                     INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
@@ -388,15 +368,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $stmt_clients->execute();
                 $stmt_clients->close();
-                add_debug("✅ BD: CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
+                error_log("✅ BD: CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
 
                 $conn->commit();
-                add_debug("✅ BD: TRANSACCIÓN COMPLETADA");
+                error_log("✅ BD: TRANSACCIÓN COMPLETADA");
 
                 $loginOk = omada_hotspot_login();
-                $authStatus .= 'login=' . ($loginOk ? 'ok' : 'fail') . ';';
                 if (!$loginOk) {
-                    add_debug("⚠️ REGISTRO: OMADA LOGIN FALLÓ");
+                    error_log("⚠️ REGISTRO: OMADA LOGIN FALLÓ, REDIRIGIMOS SIN AUTH");
                 } else {
                     $authOk = omada_authorize_client(
                         $mac_norm,
@@ -406,27 +385,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $site,
                         120
                     );
-                    $authStatus .= 'auth=' . ($authOk ? 'ok' : 'fail') . ';';
-                    add_debug("📝 REGISTRO: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
+                    error_log("📝 REGISTRO: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
                 }
 
                 if (!empty($redirect_url)) {
-                    add_debug("➡️ REGISTRO: REDIRECT A ORIGINAL: $redirect_url");
+                    error_log("➡️ REGISTRO: REDIRECT A ORIGINAL: $redirect_url");
                     header("Location: " . $redirect_url);
                 } else {
-                    add_debug("➡️ REGISTRO: REDIRECT A GOOGLE");
+                    error_log("➡️ REGISTRO: REDIRECT A GOOGLE");
                     header("Location: https://www.google.com");
                 }
                 exit;
 
             } catch (Exception $e) {
-                add_debug("❌ BD/REGISTRO: ERROR: " . $e->getMessage());
+                error_log("❌ BD/REGISTRO: ERROR: " . $e->getMessage());
                 $conn->rollback();
                 header('Content-Type: text/plain; charset=utf-8');
                 die('Error en registro');
             }
         } else {
-            add_debug("⚠️ REGISTRO: VALIDACIÓN FALLÓ, ERRORES: " . print_r($errors, true));
+            error_log("⚠️ REGISTRO: VALIDACIÓN FALLÓ, ERRORES: " . print_r($errors, true));
             $_POST['nombre']   = $nombre;
             $_POST['apellido'] = $apellido;
             $_POST['cedula']   = $cedula;
@@ -779,74 +757,10 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
         .hidden {
             display: none;
         }
-
-        /* DEBUG BOX */
-        .debug-box {
-            margin-top: 14px;
-            padding: 10px 12px;
-            background: rgba(22, 163, 74, 0.1);
-            border-radius: 12px;
-            border: 1px dashed rgba(22, 163, 74, 0.7);
-            font-size: 0.75rem;
-            color: #065f46;
-            max-height: 160px;
-            overflow-y: auto;
-        }
-        .debug-box pre {
-            white-space: pre-wrap;
-            word-break: break-word;
-            font-size: 0.72rem;
-        }
-
-        /* LOADING OVERLAY */
-        .loading-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(6, 95, 70, 0.85);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-            color: #ecfdf5;
-            text-align: center;
-            padding: 20px;
-        }
-        .loading-overlay.hidden {
-            display: none;
-        }
-        .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border-radius: 999px;
-            border: 3px solid rgba(16, 185, 129, 0.4);
-            border-top-color: #a7f3d0;
-            animation: spin 0.9s linear infinite;
-            margin-bottom: 12px;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        .loading-text-main {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-        .loading-text-sub {
-            font-size: 0.9rem;
-            opacity: 0.9;
-        }
     </style>
 </head>
 <body>
 <div class="page-wrapper">
-
-    <!-- OVERLAY LOADING -->
-    <div id="loading-overlay" class="loading-overlay hidden">
-        <div class="loading-spinner"></div>
-        <div class="loading-text-main">Conectando a Internet...</div>
-        <div class="loading-text-sub">Por favor espera mientras autorizamos tu dispositivo.</div>
-    </div>
 
     <!-- SLIDER DE 5 PROMOS -->
     <div class="promo-slider">
@@ -878,7 +792,7 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
 
                 <div class="btn-row">
                     <!-- QUICK CONNECT -->
-                    <button type="button" class="btn btn-primary" onclick="startQuickConnect();">
+                    <button type="button" class="btn btn-primary" onclick="document.getElementById('quick-connect-form').submit();">
                         NAVEGAR
                     </button>
 
@@ -907,24 +821,6 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
                 <?php if (!empty($errors['mac'])): ?>
                     <div class="error" style="margin-top:10px;">
                         <?php echo htmlspecialchars($errors['mac']); ?>
-                    </div>
-                <?php endif; ?>
-
-                <!-- DEBUG BOX -->
-                <?php if (DEBUG_MODE): ?>
-                    <div class="debug-box">
-                        <strong>DEBUG (solo visible para pruebas):</strong><br>
-                        <div>Acción: <b><?php echo htmlspecialchars($lastAction); ?></b></div>
-                        <div>Auth status: <b><?php echo htmlspecialchars($authStatus); ?></b></div>
-                        <div>MAC (cruda): <?php echo htmlspecialchars($mac_raw); ?></div>
-                        <div>MAC (norm): <?php echo htmlspecialchars($mac_norm); ?></div>
-                        <div>AP MAC: <?php echo htmlspecialchars($ap_raw); ?></div>
-                        <div>Site: <?php echo htmlspecialchars($site); ?></div>
-                        <div>Redirect URL: <?php echo htmlspecialchars($redirect_url); ?></div>
-                        <?php if (!empty($debugSteps)): ?>
-                            <hr>
-                            <pre><?php echo htmlspecialchars(implode("\n", $debugSteps)); ?></pre>
-                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
 
@@ -962,7 +858,7 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
                         <div class="error"><?php echo htmlspecialchars($errors['mac']); ?></div>
                     <?php endif; ?>
 
-                    <form id="form-wifi-gonet" method="POST" autocomplete="on" novalidate onsubmit="return showLoading();">
+                    <form id="form-wifi-gonet" method="POST" autocomplete="on" novalidate>
                         <div class="form-group">
                             <label>Nombre *</label>
                             <input type="text" name="nombre" required
@@ -1050,7 +946,7 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
 </div>
 
 <script>
-    // Slider simple de 5 imágenes
+    // Slider simple de 5 imágenes (sin ES6 para máxima compatibilidad)
     (function() {
         var slides = document.getElementsByClassName('promo-slide');
         if (!slides.length) return;
@@ -1066,12 +962,13 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
             }
         }
 
-        setInterval(function () {
+        setInterval(function() {
             current = (current + 1) % slides.length;
             showSlide(current);
         }, 5000);
     })();
 
+    // Mostrar el formulario cuando se hace click en "aplasta aquí"
     function showForm() {
         var formPanel = document.getElementById('form-panel');
         var mainCard  = document.getElementById('main-card');
@@ -1081,27 +978,9 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
             try {
                 formPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } catch (e) {
+                // por si el navegador no soporta scrollIntoView con opciones
                 formPanel.scrollIntoView();
             }
-        }
-    }
-
-    function showLoading() {
-        var overlay = document.getElementById('loading-overlay');
-        if (overlay) {
-            overlay.classList.remove('hidden');
-        }
-        return true; // permite que el form se envíe
-    }
-
-    function startQuickConnect() {
-        var overlay = document.getElementById('loading-overlay');
-        if (overlay) {
-            overlay.classList.remove('hidden');
-        }
-        var form = document.getElementById('quick-connect-form');
-        if (form) {
-            form.submit();
         }
     }
 </script>
