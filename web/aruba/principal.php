@@ -134,16 +134,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim($_POST['email']    ?? '');
     $terminos = isset($_POST['terminos']) ? 1 : 0;
 
-    // MAC y AP MAC enviadas por el formulario (o arrastradas desde GET)
+    // MAC y AP MAC desde campos ocultos
     $mac_post_raw = $_POST['mac']    ?? '';
-    $ap_post_raw  = $_POST['ap_mac'] ?? $ap_raw;
+    $ap_post_raw  = $_POST['ap_mac'] ?? '';
 
     $mac_norm    = normalize_mac($mac_post_raw);
     $ap_mac_norm = normalize_mac($ap_post_raw);
 
-    // Validaciones
+    // Validaciones (MAC solo a nivel interno, sin mostrar al usuario)
     if ($mac_norm === '' || strlen($mac_norm) !== 12) {
-        $errors['mac'] = 'MAC inválida. Usa formato como AA:BB:CC:DD:EE:FF';
+        $errors['mac'] = 'No se pudo identificar correctamente tu dispositivo.';
     }
 
     if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
@@ -342,14 +342,6 @@ if ($mac_norm !== '' && $_SERVER['REQUEST_METHOD'] === 'GET') {
             font-size: 0.85rem; 
             margin-top: 6px; 
         }
-        .mac-display { 
-            background: #f8f9fa; 
-            padding: 15px; 
-            border-radius: 12px; 
-            margin: 15px 0; 
-            text-align: center; 
-            word-break: break-all; 
-        }
         .info-display { 
             background: #e3f2fd; 
             padding: 12px; 
@@ -367,79 +359,64 @@ if ($mac_norm !== '' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     <div class="form-container">
         <h2>Registro para Wi-Fi 🌐</h2>
 
-        <?php if ($mac_raw !== ''): ?>
-            <div class="mac-display">
-                <strong>📱 Dispositivo detectado:</strong><br>
-                MAC recibida: <?php echo htmlspecialchars($mac_raw); ?>
-            </div>
-            <div class="info-display">
-                Puedes dejar esta MAC o corregirla en el campo de abajo.
+        <?php if ($mac_norm === ''): ?>
+            <div class="error">
+                ❌ No se detectó correctamente tu dispositivo.<br>
+                <small>Intenta reconectarte a la red Wi-Fi.</small>
             </div>
         <?php else: ?>
             <div class="info-display">
-                📝 Ingresa la MAC de tu dispositivo para continuar.<br>
-                Ejemplo: <code>AA:BB:CC:DD:EE:FF</code>
+                📝 Completa el formulario para activar tu acceso a Internet.
             </div>
+
+            <form method="POST" autocomplete="on" novalidate>
+                <div class="form-group">
+                    <label><strong>Nombre *</strong></label>
+                    <input type="text" name="nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
+                    <?php if (!empty($errors['nombre'])): ?><div class="field-error"><?php echo $errors['nombre']; ?></div><?php endif; ?>
+                </div>
+
+                <div class="form-group">
+                    <label><strong>Apellido *</strong></label>
+                    <input type="text" name="apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
+                    <?php if (!empty($errors['apellido'])): ?><div class="field-error"><?php echo $errors['apellido']; ?></div><?php endif; ?>
+                </div>
+
+                <div class="form-group">
+                    <label><strong>Cédula (10 dígitos) *</strong></label>
+                    <input type="text" name="cedula" inputmode="numeric" required value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
+                    <?php if (!empty($errors['cedula'])): ?><div class="field-error"><?php echo $errors['cedula']; ?></div><?php endif; ?>
+                </div>
+
+                <div class="form-group">
+                    <label><strong>Teléfono (09XXXXXXXX) *</strong></label>
+                    <input type="tel" name="telefono" inputmode="tel" required value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
+                    <?php if (!empty($errors['telefono'])): ?><div class="field-error"><?php echo $errors['telefono']; ?></div><?php endif; ?>
+                </div>
+
+                <div class="form-group">
+                    <label><strong>Email *</strong></label>
+                    <input type="email" name="email" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
+                    <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo $errors['email']; ?></div><?php endif; ?>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="terminos" required <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?>>
+                        <strong>Acepto Términos y Condiciones *</strong>
+                    </label>
+                    <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo $errors['terminos']; ?></div><?php endif; ?>
+                </div>
+
+                <!-- Hidden: el usuario no ve MAC ni AP ni redirect -->
+                <input type="hidden" name="mac" value="<?php echo htmlspecialchars($mac_norm); ?>">
+                <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_raw); ?>">
+                <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
+                <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
+
+                <button type="submit">🚀 Conectar a Internet</button>
+            </form>
         <?php endif; ?>
-
-        <form method="POST" autocomplete="on" novalidate>
-            <div class="form-group">
-                <label><strong>MAC del dispositivo *</strong></label>
-                <input 
-                    type="text" 
-                    name="mac" 
-                    required 
-                    placeholder="AA:BB:CC:DD:EE:FF"
-                    value="<?php echo htmlspecialchars($_POST['mac'] ?? $mac_raw); ?>"
-                >
-                <?php if (!empty($errors['mac'])): ?><div class="field-error"><?php echo $errors['mac']; ?></div><?php endif; ?>
-            </div>
-
-            <div class="form-group">
-                <label><strong>Nombre *</strong></label>
-                <input type="text" name="nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
-                <?php if (!empty($errors['nombre'])): ?><div class="field-error"><?php echo $errors['nombre']; ?></div><?php endif; ?>
-            </div>
-
-            <div class="form-group">
-                <label><strong>Apellido *</strong></label>
-                <input type="text" name="apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
-                <?php if (!empty($errors['apellido'])): ?><div class="field-error"><?php echo $errors['apellido']; ?></div><?php endif; ?>
-            </div>
-
-            <div class="form-group">
-                <label><strong>Cédula (10 dígitos) *</strong></label>
-                <input type="text" name="cedula" inputmode="numeric" required value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
-                <?php if (!empty($errors['cedula'])): ?><div class="field-error"><?php echo $errors['cedula']; ?></div><?php endif; ?>
-            </div>
-
-            <div class="form-group">
-                <label><strong>Teléfono (09XXXXXXXX) *</strong></label>
-                <input type="tel" name="telefono" inputmode="tel" required value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
-                <?php if (!empty($errors['telefono'])): ?><div class="field-error"><?php echo $errors['telefono']; ?></div><?php endif; ?>
-            </div>
-
-            <div class="form-group">
-                <label><strong>Email *</strong></label>
-                <input type="email" name="email" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
-                <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo $errors['email']; ?></div><?php endif; ?>
-            </div>
-
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" name="terminos" required <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?>>
-                    <strong>Acepto Términos y Condiciones *</strong>
-                </label>
-                <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo $errors['terminos']; ?></div><?php endif; ?>
-            </div>
-
-            <!-- Hidden para pasar IP, AP y redirect en el POST -->
-            <input type="hidden" name="ip" value="<?php echo htmlspecialchars($ip); ?>">
-            <input type="hidden" name="ap_mac" value="<?php echo htmlspecialchars($ap_raw); ?>">
-            <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
-
-            <button type="submit">🚀 Conectar a Internet</button>
-        </form>
     </div>
 
     <img src="banner.png" alt="Banner" style="width: 100%; max-width: 400px; border-radius: 15px; margin: 10px 0;">
