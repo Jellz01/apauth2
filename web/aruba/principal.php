@@ -117,7 +117,7 @@ function omada_hotspot_login(): bool {
     $loginInfo = [
         "name"     => OMADA_OP_USER,
         "password" => OMADA_OP_PASS,
-        "site"     => OMADA_SITE, // algunos ejemplos no lo ponen, pero no estorba
+        "site"     => OMADA_SITE,
     ];
 
     $url = sprintf(
@@ -304,8 +304,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $conn->commit();
             error_log("✅ TRANSACCIÓN COMPLETADA");
 
-            // === AHORA: LLAMAR A OMADA PARA AUTORIZAR DISPOSITIVO ===
-
             // 1) Login Hotspot API
             if (!omada_hotspot_login()) {
                 error_log("⚠️ Omada hotspot login falló, redirigiendo igual");
@@ -327,7 +325,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 120
             );
 
-            // 3) Redirigir a la URL original que el user quería
+            // 3) Redirigir a la URL original
             if (!empty($redirect_url)) {
                 header("Location: " . $redirect_url);
             } else {
@@ -368,8 +366,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', Roboto, Ubuntu, sans-serif;
-            background: #020617;
-            color: #0f172a;
+            background: linear-gradient(135deg, #022c22 0%, #065f46 45%, #10b981 100%);
+            color: #022c22;
             min-height: 100vh;
         }
 
@@ -394,7 +392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background-position: center;
             background-size: cover;
             background-repeat: no-repeat;
-            filter: brightness(0.5);
+            filter: brightness(0.75);
         }
 
         .promo-slide.active {
@@ -414,15 +412,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .main-card {
             width: 100%;
             max-width: 900px;
-            background: rgba(15, 23, 42, 0.78);
+            background: rgba(226, 252, 236, 0.95);
             border-radius: 24px;
             padding: 24px;
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(16px);
-            border: 1px solid rgba(148, 163, 184, 0.3);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(16, 185, 129, 0.35);
             display: grid;
             grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
             gap: 24px;
+        }
+
+        .main-card.full-left {
+            grid-template-columns: 1fr;
         }
 
         @media (max-width: 768px) {
@@ -435,7 +437,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             display: flex;
             flex-direction: column;
             gap: 12px;
-            color: #e5e7eb;
+            color: #022c22;
         }
 
         .logo {
@@ -446,12 +448,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .welcome-title {
             font-size: 1.8rem;
             font-weight: 700;
-            color: #f9fafb;
+            color: #022c22;
         }
 
         .welcome-subtitle {
             font-size: 0.95rem;
-            color: #cbd5f5;
+            color: #064e3b;
         }
 
         .badge-ssid {
@@ -460,8 +462,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             gap: 8px;
             padding: 6px 12px;
             border-radius: 999px;
-            background: rgba(15, 118, 110, 0.15);
-            color: #a5f3fc;
+            background: rgba(16, 185, 129, 0.12);
+            color: #047857;
             font-size: 0.8rem;
             margin-top: 4px;
         }
@@ -495,7 +497,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .btn-primary {
             background: #00a870;
-            color: #f9fafb;
+            color: #ecfdf5;
             box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
         }
 
@@ -506,33 +508,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         .btn-secondary {
-            background: rgba(148, 163, 184, 0.18);
-            color: #e5e7eb;
-            border: 1px solid rgba(148, 163, 184, 0.5);
+            background: #dcfce7;
+            color: #065f46;
+            border: 1px solid rgba(34, 197, 94, 0.7);
         }
 
         .btn-secondary:hover {
             transform: translateY(-1px);
-            background: rgba(148, 163, 184, 0.32);
+            background: #bbf7d0;
         }
 
         .contact-block {
             margin-top: 16px;
             padding: 12px 12px 10px;
             border-radius: 16px;
-            background: rgba(15, 23, 42, 0.9);
-            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: #ecfdf5;
+            border: 1px solid rgba(22, 163, 74, 0.35);
         }
 
         .contact-block h3 {
             font-size: 0.95rem;
-            color: #e5e7eb;
+            color: #064e3b;
             margin-bottom: 4px;
         }
 
         .contact-block p {
             font-size: 0.85rem;
-            color: #cbd5e1;
+            color: #047857;
         }
 
         .whatsapp-list {
@@ -541,7 +543,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         .whatsapp-list a {
-            color: #22c55e;
+            color: #15803d;
             text-decoration: none;
         }
 
@@ -552,54 +554,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .more-info {
             margin-top: 10px;
             font-size: 0.8rem;
-            color: #cbd5e1;
+            color: #065f46;
         }
 
-        .more-info a {
-            color: #38bdf8;
+        .link-more {
+            border: none;
+            background: none;
+            padding: 0;
+            margin-left: 4px;
+            color: #0284c7;
+            font-size: 0.8rem;
             text-decoration: underline;
+            cursor: pointer;
         }
 
-        .more-info a:hover {
-            color: #0ea5e9;
+        .link-more:hover {
+            color: #0369a1;
         }
 
         .form-side {
-            background: rgba(15, 23, 42, 0.96);
+            background: #ecfdf5;
             border-radius: 18px;
             padding: 18px 16px 14px;
-            border: 1px solid rgba(148, 163, 184, 0.4);
+            border: 1px solid rgba(22, 163, 74, 0.4);
         }
 
         .form-title {
             font-size: 1.05rem;
             font-weight: 600;
-            color: #e5e7eb;
+            color: #064e3b;
             margin-bottom: 6px;
         }
 
         .form-subtitle {
             font-size: 0.8rem;
-            color: #9ca3af;
+            color: #047857;
             margin-bottom: 10px;
         }
 
         .info-display {
-            background: rgba(59, 130, 246, 0.1);
+            background: #d1fae5;
             border-radius: 12px;
             padding: 8px 10px;
             font-size: 0.8rem;
-            color: #bfdbfe;
+            color: #065f46;
             margin-bottom: 8px;
             text-align: left;
         }
 
         .error-mac {
-            background: rgba(248, 113, 113, 0.12);
+            background: #fee2e2;
             border-radius: 12px;
             padding: 10px;
             font-size: 0.85rem;
-            color: #fecaca;
+            color: #b91c1c;
             margin-bottom: 8px;
         }
 
@@ -611,7 +619,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             display: block;
             font-size: 0.8rem;
             font-weight: 600;
-            color: #e5e7eb;
+            color: #064e3b;
             margin-bottom: 4px;
         }
 
@@ -621,10 +629,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             width: 100%;
             padding: 9px 10px;
             border-radius: 10px;
-            border: 1px solid rgba(148, 163, 184, 0.7);
+            border: 1px solid rgba(22, 163, 74, 0.6);
             font-size: 0.9rem;
-            background: rgba(15, 23, 42, 0.9);
-            color: #e5e7eb;
+            background: #ffffff;
+            color: #022c22;
         }
 
         input::placeholder {
@@ -633,19 +641,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         input:focus {
             outline: none;
-            border-color: #38bdf8;
-            box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.5);
+            border-color: #10b981;
+            box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.5);
         }
 
         .field-error {
-            color: #fecaca;
+            color: #b91c1c;
             font-size: 0.75rem;
             margin-top: 3px;
         }
 
         .error {
-            background: rgba(248, 113, 113, 0.12);
-            color: #fecaca;
+            background: #fee2e2;
+            color: #b91c1c;
             padding: 8px 10px;
             border-radius: 10px;
             margin: 6px 0;
@@ -656,18 +664,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .terms-row {
             margin-top: 4px;
             font-size: 0.78rem;
-            color: #e5e7eb;
+            color: #064e3b;
             display: flex;
             gap: 6px;
         }
 
         .terms-row a {
-            color: #38bdf8;
+            color: #0284c7;
             text-decoration: underline;
         }
 
         .terms-row a:hover {
-            color: #0ea5e9;
+            color: #0369a1;
         }
 
         .submit-row {
@@ -676,6 +684,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .submit-row button {
             width: 100%;
+        }
+
+        .hidden {
+            display: none;
         }
     </style>
 </head>
@@ -692,7 +704,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <div class="overlay">
-        <div class="main-card">
+        <div class="main-card full-left" id="main-card">
             <!-- LADO IZQUIERDO: BIENVENIDA / BOTONES / WHATSAPP -->
             <div class="welcome-side">
                 <img src="gonetlogo.png" alt="GoNet" class="logo">
@@ -711,8 +723,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </p>
 
                 <div class="btn-row">
-                    <!-- Este botón envía el formulario (submit real está en el otro lado) -->
-                    <button type="button" class="btn btn-primary" onclick="document.getElementById('form-wifi-gonet').submit();">
+                    <!-- Este botón ahora SOLO muestra el formulario -->
+                    <button type="button" class="btn btn-primary" onclick="showForm();">
                         NAVEGAR
                     </button>
 
@@ -735,15 +747,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <div class="more-info">
                     Para más información
-                    <a href="https://forms.gle/TU_FORMULARIO_AQUI" target="_blank" rel="noopener">
+                    <button type="button" class="link-more" onclick="showForm();">
                         aplasta aquí
-                    </a>.
-                    <!-- CAMBIA LA URL AL FORM REAL QUE QUIERES USAR -->
+                    </button>.
                 </div>
             </div>
 
-            <!-- LADO DERECHO: FORMULARIO DE REGISTRO -->
-            <div class="form-side">
+            <!-- LADO DERECHO: FORMULARIO DE REGISTRO (OCULTO HASTA QUE DEN CLICK) -->
+            <div class="form-side hidden" id="form-panel">
                 <div class="form-title">Registro rápido</div>
                 <div class="form-subtitle">
                     Completa tus datos para activar tu acceso a Internet.
@@ -869,6 +880,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             showSlide(current);
         }, 5000); // cada 5 segundos
     })();
+
+    // Mostrar el formulario cuando se hace click en "NAVEGAR" o "aplasta aquí"
+    function showForm() {
+        const formPanel = document.getElementById('form-panel');
+        const mainCard  = document.getElementById('main-card');
+        if (formPanel && mainCard) {
+            formPanel.classList.remove('hidden');
+            mainCard.classList.remove('full-left');
+            formPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
 </script>
 </body>
 </html>
