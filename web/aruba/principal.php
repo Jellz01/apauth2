@@ -358,162 +358,517 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registro Wi-Fi - GoNet</title>
+    <title>Internet Wi-Fi - GoNet</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-            font-family: 'Arial', sans-serif; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            justify-content: center; 
-            min-height: 100vh; 
-            padding: 20px; 
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
-        .form-container { 
-            background: white; 
-            padding: 30px 25px; 
-            border-radius: 20px; 
-            box-shadow: 0 15px 35px rgba(0,0,0,0.2); 
-            width: 100%; 
-            max-width: 450px; 
-            margin: 20px 0; 
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', Roboto, Ubuntu, sans-serif;
+            background: #020617;
+            color: #0f172a;
+            min-height: 100vh;
         }
-        h2 { 
-            color: #2c3e50; 
-            text-align: center; 
-            margin-bottom: 25px; 
-            font-size: 1.8rem; 
+
+        .page-wrapper {
+            position: relative;
+            min-height: 100vh;
+            overflow: hidden;
         }
-        .form-group { margin-bottom: 16px; }
-        label { 
-            display: block; 
-            font-weight: 600; 
-            margin-bottom: 6px; 
+
+        /* SLIDER DE PROMOS */
+        .promo-slider {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
         }
-        input { 
-            width: 100%; 
-            padding: 12px; 
-            border: 2px solid #e1e8ed; 
-            border-radius: 12px; 
-            font-size: 1rem; 
+
+        .promo-slide {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+            background-position: center;
+            background-size: cover;
+            background-repeat: no-repeat;
+            filter: brightness(0.5);
         }
-        input:focus { 
-            outline: none; 
-            border-color: #667eea; 
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); 
+
+        .promo-slide.active {
+            opacity: 1;
         }
-        button { 
-            width: 100%; 
-            padding: 14px; 
-            background: linear-gradient(135deg, #667eea, #764ba2); 
-            color: white; 
-            border: none; 
-            border-radius: 12px; 
-            font-size: 1.05rem; 
-            font-weight: 600; 
-            cursor: pointer; 
-            margin-top: 10px; 
-            transition: all 0.3s ease; 
+
+        .overlay {
+            position: relative;
+            z-index: 2;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
         }
-        button:hover { 
-            transform: translateY(-2px); 
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); 
+
+        .main-card {
+            width: 100%;
+            max-width: 900px;
+            background: rgba(15, 23, 42, 0.78);
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+            gap: 24px;
         }
-        .error { 
-            background: #ffebee; 
-            color: #c62828; 
-            padding: 12px; 
-            border-radius: 10px; 
-            margin: 15px 0; 
-            text-align: center; 
+
+        @media (max-width: 768px) {
+            .main-card {
+                grid-template-columns: 1fr;
+            }
         }
-        .field-error { 
-            color: #c62828; 
-            font-size: 0.85rem; 
-            margin-top: 6px; 
+
+        .welcome-side {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            color: #e5e7eb;
         }
-        .info-display { 
-            background: #e3f2fd; 
-            padding: 12px; 
-            border-radius: 10px; 
-            margin: 10px 0; 
-            font-size: 0.9rem; 
-            color: #1565c0; 
-            text-align: center; 
+
+        .logo {
+            width: 190px;
+            margin-bottom: 6px;
+        }
+
+        .welcome-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #f9fafb;
+        }
+
+        .welcome-subtitle {
+            font-size: 0.95rem;
+            color: #cbd5f5;
+        }
+
+        .badge-ssid {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(15, 118, 110, 0.15);
+            color: #a5f3fc;
+            font-size: 0.8rem;
+            margin-top: 4px;
+        }
+
+        .badge-ssid span {
+            font-weight: 600;
+        }
+
+        .btn-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .btn {
+            border-radius: 999px;
+            padding: 10px 20px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            text-decoration: none;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: #00a870;
+            color: #f9fafb;
+            box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 18px 40px rgba(16, 185, 129, 0.6);
+            background: #059669;
+        }
+
+        .btn-secondary {
+            background: rgba(148, 163, 184, 0.18);
+            color: #e5e7eb;
+            border: 1px solid rgba(148, 163, 184, 0.5);
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-1px);
+            background: rgba(148, 163, 184, 0.32);
+        }
+
+        .contact-block {
+            margin-top: 16px;
+            padding: 12px 12px 10px;
+            border-radius: 16px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.35);
+        }
+
+        .contact-block h3 {
+            font-size: 0.95rem;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+
+        .contact-block p {
+            font-size: 0.85rem;
+            color: #cbd5e1;
+        }
+
+        .whatsapp-list {
+            margin-top: 6px;
+            font-size: 0.85rem;
+        }
+
+        .whatsapp-list a {
+            color: #22c55e;
+            text-decoration: none;
+        }
+
+        .whatsapp-list a:hover {
+            text-decoration: underline;
+        }
+
+        .more-info {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            color: #cbd5e1;
+        }
+
+        .more-info a {
+            color: #38bdf8;
+            text-decoration: underline;
+        }
+
+        .more-info a:hover {
+            color: #0ea5e9;
+        }
+
+        .form-side {
+            background: rgba(15, 23, 42, 0.96);
+            border-radius: 18px;
+            padding: 18px 16px 14px;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+        }
+
+        .form-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 6px;
+        }
+
+        .form-subtitle {
+            font-size: 0.8rem;
+            color: #9ca3af;
+            margin-bottom: 10px;
+        }
+
+        .info-display {
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 12px;
+            padding: 8px 10px;
+            font-size: 0.8rem;
+            color: #bfdbfe;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+
+        .error-mac {
+            background: rgba(248, 113, 113, 0.12);
+            border-radius: 12px;
+            padding: 10px;
+            font-size: 0.85rem;
+            color: #fecaca;
+            margin-bottom: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 10px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+
+        input[type="text"],
+        input[type="tel"],
+        input[type="email"] {
+            width: 100%;
+            padding: 9px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(148, 163, 184, 0.7);
+            font-size: 0.9rem;
+            background: rgba(15, 23, 42, 0.9);
+            color: #e5e7eb;
+        }
+
+        input::placeholder {
+            color: #6b7280;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.5);
+        }
+
+        .field-error {
+            color: #fecaca;
+            font-size: 0.75rem;
+            margin-top: 3px;
+        }
+
+        .error {
+            background: rgba(248, 113, 113, 0.12);
+            color: #fecaca;
+            padding: 8px 10px;
+            border-radius: 10px;
+            margin: 6px 0;
+            text-align: center;
+            font-size: 0.8rem;
+        }
+
+        .terms-row {
+            margin-top: 4px;
+            font-size: 0.78rem;
+            color: #e5e7eb;
+            display: flex;
+            gap: 6px;
+        }
+
+        .terms-row a {
+            color: #38bdf8;
+            text-decoration: underline;
+        }
+
+        .terms-row a:hover {
+            color: #0ea5e9;
+        }
+
+        .submit-row {
+            margin-top: 10px;
+        }
+
+        .submit-row button {
+            width: 100%;
         }
     </style>
 </head>
 <body>
-    <img src="gonetlogo.png" alt="GoNet Logo" style="width: 100%; max-width: 400px; border-radius: 15px; margin: 10px 0;">
+<div class="page-wrapper">
 
-    <div class="form-container">
-        <h2>Registro para Wi-Fi 🌐</h2>
-
-        <?php if ($mac_norm === ''): ?>
-            <div class="error">
-                ❌ No se detectó correctamente tu dispositivo.<br>
-                <small>Intenta reconectarte a la red Wi-Fi.</small>
-            </div>
-        <?php else: ?>
-            <div class="info-display">
-                📝 Completa el formulario para activar tu acceso a Internet.
-            </div>
-
-            <form method="POST" autocomplete="on" novalidate>
-                <div class="form-group">
-                    <label><strong>Nombre *</strong></label>
-                    <input type="text" name="nombre" required value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>">
-                    <?php if (!empty($errors['nombre'])): ?><div class="field-error"><?php echo $errors['nombre']; ?></div><?php endif; ?>
-                </div>
-
-                <div class="form-group">
-                    <label><strong>Apellido *</strong></label>
-                    <input type="text" name="apellido" required value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>">
-                    <?php if (!empty($errors['apellido'])): ?><div class="field-error"><?php echo $errors['apellido']; ?></div><?php endif; ?>
-                </div>
-
-                <div class="form-group">
-                    <label><strong>Cédula (10 dígitos) *</strong></label>
-                    <input type="text" name="cedula" inputmode="numeric" required value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>">
-                    <?php if (!empty($errors['cedula'])): ?><div class="field-error"><?php echo $errors['cedula']; ?></div><?php endif; ?>
-                </div>
-
-                <div class="form-group">
-                    <label><strong>Teléfono (09XXXXXXXX) *</strong></label>
-                    <input type="tel" name="telefono" inputmode="tel" required value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>">
-                    <?php if (!empty($errors['telefono'])): ?><div class="field-error"><?php echo $errors['telefono']; ?></div><?php endif; ?>
-                </div>
-
-                <div class="form-group">
-                    <label><strong>Email *</strong></label>
-                    <input type="email" name="email" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
-                    <?php if (!empty($errors['email'])): ?><div class="field-error"><?php echo $errors['email']; ?></div><?php endif; ?>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" name="terminos" required <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?>>
-                        <strong>Acepto Términos y Condiciones *</strong>
-                    </label>
-                    <?php if (!empty($errors['terminos'])): ?><div class="field-error"><?php echo $errors['terminos']; ?></div><?php endif; ?>
-                </div>
-
-                <!-- Hidden: el usuario no ve MAC/AP/SSID/SITE/REDIRECT -->
-                <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
-                <input type="hidden" name="ap_mac"       value="<?php echo htmlspecialchars($ap_raw); ?>">
-                <input type="hidden" name="ip"           value="<?php echo htmlspecialchars($ip); ?>">
-                <input type="hidden" name="ssidName"     value="<?php echo htmlspecialchars($ssidName); ?>">
-                <input type="hidden" name="radioId"      value="<?php echo htmlspecialchars($radioId); ?>">
-                <input type="hidden" name="site"         value="<?php echo htmlspecialchars($site); ?>">
-                <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
-
-                <button type="submit">🚀 Conectar a Internet</button>
-            </form>
-        <?php endif; ?>
+    <!-- SLIDER DE 5 PROMOS (CAMBIA LAS IMÁGENES A LAS TUYAS) -->
+    <div class="promo-slider">
+        <div class="promo-slide active" style="background-image: url('promo1.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo2.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo3.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo4.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo5.jpg');"></div>
     </div>
 
-    <img src="banner.png" alt="Banner" style="width: 100%; max-width: 400px; border-radius: 15px; margin: 10px 0;">
+    <div class="overlay">
+        <div class="main-card">
+            <!-- LADO IZQUIERDO: BIENVENIDA / BOTONES / WHATSAPP -->
+            <div class="welcome-side">
+                <img src="gonetlogo.png" alt="GoNet" class="logo">
+
+                <div class="badge-ssid">
+                    <span>Wi-Fi GoNet</span>
+                    <span>•</span>
+                    <span><?php echo htmlspecialchars($ssidName ?: 'Red invitado'); ?></span>
+                </div>
+
+                <h1 class="welcome-title">
+                    Bienvenidos al Internet de GoNet
+                </h1>
+                <p class="welcome-subtitle">
+                    Disfruta de una conexión rápida y estable mientras navegas, trabajas o te entretienes.
+                </p>
+
+                <div class="btn-row">
+                    <!-- Este botón envía el formulario (submit real está en el otro lado) -->
+                    <button type="button" class="btn btn-primary" onclick="document.getElementById('form-wifi-gonet').submit();">
+                        NAVEGAR
+                    </button>
+
+                    <!-- BOTÓN WHATSAPP (CAMBIA EL NÚMERO) -->
+                    <a class="btn btn-secondary" href="https://wa.me/593900000000" target="_blank" rel="noopener">
+                        Comunícate con nosotros
+                    </a>
+                </div>
+
+                <div class="contact-block">
+                    <h3>Soporte y ventas GoNet</h3>
+                    <p>Si necesitas ayuda o quieres contratar nuestros servicios, estamos para ayudarte.</p>
+                    <div class="whatsapp-list">
+                        WhatsApp:
+                        <!-- CAMBIA ESTOS NÚMEROS A LOS REALES -->
+                        <div><a href="https://wa.me/593900000001" target="_blank">+593 9 0000 0001</a></div>
+                        <div><a href="https://wa.me/593900000002" target="_blank">+593 9 0000 0002</a></div>
+                    </div>
+                </div>
+
+                <div class="more-info">
+                    Para más información
+                    <a href="https://forms.gle/TU_FORMULARIO_AQUI" target="_blank" rel="noopener">
+                        aplasta aquí
+                    </a>.
+                    <!-- CAMBIA LA URL AL FORM REAL QUE QUIERES USAR -->
+                </div>
+            </div>
+
+            <!-- LADO DERECHO: FORMULARIO DE REGISTRO -->
+            <div class="form-side">
+                <div class="form-title">Registro rápido</div>
+                <div class="form-subtitle">
+                    Completa tus datos para activar tu acceso a Internet.
+                </div>
+
+                <?php if ($mac_norm === ''): ?>
+                    <div class="error-mac">
+                        ❌ No se detectó correctamente tu dispositivo.<br>
+                        <small>Por favor, desconéctate y vuelve a conectarte a la red Wi-Fi.</small>
+                    </div>
+                <?php else: ?>
+                    <div class="info-display">
+                        Tu dispositivo está listo para ser registrado. Solo necesitamos algunos datos.
+                    </div>
+
+                    <?php if (!empty($errors['mac'])): ?>
+                        <div class="error"><?php echo htmlspecialchars($errors['mac']); ?></div>
+                    <?php endif; ?>
+
+                    <form id="form-wifi-gonet" method="POST" autocomplete="on" novalidate>
+                        <div class="form-group">
+                            <label>Nombre *</label>
+                            <input type="text" name="nombre" required
+                                   value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>"
+                                   placeholder="Ingresa tu nombre">
+                            <?php if (!empty($errors['nombre'])): ?>
+                                <div class="field-error"><?php echo $errors['nombre']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Apellido *</label>
+                            <input type="text" name="apellido" required
+                                   value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>"
+                                   placeholder="Ingresa tu apellido">
+                            <?php if (!empty($errors['apellido'])): ?>
+                                <div class="field-error"><?php echo $errors['apellido']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Cédula (10 dígitos) *</label>
+                            <input type="text" name="cedula" inputmode="numeric" required
+                                   value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>"
+                                   placeholder="Ej: 0102030405">
+                            <?php if (!empty($errors['cedula'])): ?>
+                                <div class="field-error"><?php echo $errors['cedula']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Teléfono (09XXXXXXXX) *</label>
+                            <input type="tel" name="telefono" inputmode="tel" required
+                                   value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>"
+                                   placeholder="Ej: 09XXXXXXXX">
+                            <?php if (!empty($errors['telefono'])): ?>
+                                <div class="field-error"><?php echo $errors['telefono']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Email *</label>
+                            <input type="email" name="email" required
+                                   value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>"
+                                   placeholder="tucorreo@ejemplo.com">
+                            <?php if (!empty($errors['email'])): ?>
+                                <div class="field-error"><?php echo $errors['email']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="terms-row">
+                                <input type="checkbox" name="terminos" required
+                                    <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?>>
+                                <span>
+                                    Acepto los
+                                    <a href="https://gonet.ec/terminos" target="_blank" rel="noopener">
+                                        términos y condiciones
+                                    </a>.
+                                </span>
+                            </label>
+                            <?php if (!empty($errors['terminos'])): ?>
+                                <div class="field-error"><?php echo $errors['terminos']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- Hidden: MAC/AP/SSID/SITE/REDIRECT -->
+                        <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
+                        <input type="hidden" name="ap_mac"       value="<?php echo htmlspecialchars($ap_raw); ?>">
+                        <input type="hidden" name="ip"           value="<?php echo htmlspecialchars($ip); ?>">
+                        <input type="hidden" name="ssidName"     value="<?php echo htmlspecialchars($ssidName); ?>">
+                        <input type="hidden" name="radioId"      value="<?php echo htmlspecialchars($radioId); ?>">
+                        <input type="hidden" name="site"         value="<?php echo htmlspecialchars($site); ?>">
+                        <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
+
+                        <div class="submit-row">
+                            <button type="submit" class="btn btn-primary">
+                                NAVEGAR
+                            </button>
+                        </div>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Slider simple de 5 imágenes
+    (function() {
+        const slides = document.querySelectorAll('.promo-slide');
+        if (!slides.length) return;
+        let current = 0;
+
+        function showSlide(index) {
+            slides.forEach((s, i) => {
+                s.classList.toggle('active', i === index);
+            });
+        }
+
+        setInterval(() => {
+            current = (current + 1) % slides.length;
+            showSlide(current);
+        }, 5000); // cada 5 segundos
+    })();
+</script>
 </body>
 </html>
