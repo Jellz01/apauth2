@@ -7,18 +7,18 @@ error_reporting(E_ALL);
 
 /* ============ CONFIG OMADA ============ */
 
-// IP o hostname del controller
-const OMADA_CONTROLLER    = '10.0.0.10';
+// IP o hostname del controller (PC Windows con Omada)
+const OMADA_CONTROLLER    = '192.168.0.3';
 const OMADA_PORT          = 8043;
 
-// PON AQUÍ EL ID REAL (lo que sale después de /e/ en la URL del Omada)
-const OMADA_CONTROLLER_ID = 'PON_AQUI_TU_CONTROLLER_ID';
+// Si no tienes ID, déjalo vacío. Si algún día lo encuentras, lo pones aquí.
+const OMADA_CONTROLLER_ID = '';
 
-// Usuario local del Omada (ya lo creaste)
+// Usuario local del Omada (Hotspot Operator)
 const OMADA_OP_USER       = 'portal-operator';
 const OMADA_OP_PASS       = 'S3cret!';
 
-// Nombre REAL del site (en tu caso)
+// Nombre REAL del site
 const OMADA_SITE          = 'jellz_Gonet';
 
 // Archivos temporales para cookies y token CSRF
@@ -113,6 +113,13 @@ $errors = [
 
 /** ============= Helpers Omada API ============= */
 
+function omada_build_base_path(): string {
+    if (OMADA_CONTROLLER_ID !== '') {
+        return '/' . OMADA_CONTROLLER_ID;
+    }
+    return ''; // sin ID, usa /api/v2/ directo
+}
+
 function omada_hotspot_login(): bool {
     @unlink(OMADA_COOKIE_FILE);
     @unlink(OMADA_TOKEN_FILE);
@@ -123,11 +130,13 @@ function omada_hotspot_login(): bool {
         "site"     => OMADA_SITE,
     ];
 
+    $basePath = omada_build_base_path();
+
     $url = sprintf(
-        "https://%s:%d/%s/api/v2/hotspot/login",
+        "https://%s:%d%s/api/v2/hotspot/login",
         OMADA_CONTROLLER,
         OMADA_PORT,
-        OMADA_CONTROLLER_ID
+        $basePath
     );
 
     error_log("🌐 OMADA LOGIN → URL: $url, USER: " . OMADA_OP_USER . ", SITE: " . OMADA_SITE);
@@ -206,11 +215,13 @@ function omada_authorize_client(
         $headers[] = "Csrf-Token: " . $csrfToken;
     }
 
+    $basePath = omada_build_base_path();
+
     $url = sprintf(
-        "https://%s:%d/%s/api/v2/hotspot/extPortal/auth",
+        "https://%s:%d%s/api/v2/hotspot/extPortal/auth",
         OMADA_CONTROLLER,
         OMADA_PORT,
-        OMADA_CONTROLLER_ID
+        $basePath
     );
 
     error_log("🌐 OMADA AUTH → URL: $url, DATA: " . json_encode($authInfo) . ", CSRF: " . substr($csrfToken, 0, 10) . "...");
@@ -978,7 +989,6 @@ $mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
             try {
                 formPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } catch (e) {
-                // por si el navegador no soporta scrollIntoView con opciones
                 formPanel.scrollIntoView();
             }
         }
