@@ -1,30 +1,32 @@
 <?php
-/* ========= CONFIG OMADA ========= */
+/* ============================================
+ *  CONFIG BÁSICA OMADA
+ * ============================================ */
 
-const OMADA_CONTROLLER    = '192.168.0.3';  // IP de tu controlador
-const OMADA_PORT          = 8043;
+const OMADA_CONTROLLER    = '192.168.0.3';  // IP o hostname de tu Omada Controller
+const OMADA_PORT          = 8043;           // Puerto HTTPS (por defecto 8043)
 
-// Si algún día sacas el controllerId (la parte rara en la URL),
-// lo pones aquí. Mientras tanto, vacío:
-const OMADA_CONTROLLER_ID = '';
+/*
+ * De tu URL:
+ *   https://localhost:8043/2ec6e0fb47d04f54bdfec140a0a15ca1/login?...
+ * el controllerId es: 2ec6e0fb47d04f54bdfec140a0a15ca1
+ */
+const OMADA_CONTROLLER_ID = '2ec6e0fb47d04f54bdfec140a0a15ca1';
 
-// Usuario y clave del Hotspot Operator (en Omada)
+/* Usuario y contraseña del Hotspot Operator */
 const OMADA_OP_USER       = 'portal-operator';
-const OMADA_OP_PASS       = 'S3cret!';
+const OMADA_OP_PASS       = 'Gonet2025@';
 
-// Nombre del sitio en Omada (como sale en el controller)
-const OMADA_SITE          = 'jellz_Gonet';
+/* Nombre del site solo como respaldo si Omada no manda "site" */
+const OMADA_DEFAULT_SITE  = 'jellz_Gonet';
 
-// Archivos temporales para cookies y token
+/* Archivos temporales para cookies y token CSRF */
 define('OMADA_COOKIE_FILE', sys_get_temp_dir() . '/omada_cookie.txt');
 define('OMADA_TOKEN_FILE',  sys_get_temp_dir() . '/omada_token.txt');
 
-/* ========= PEQUEÑOS HELPERS ========= */
-
-function normalize_mac($mac_raw) {
-    $hex = preg_replace('/[^0-9A-Fa-f]/', '', (string)$mac_raw);
-    return strtoupper($hex);
-}
+/* ============================================
+ *  HELPERS OMADA
+ * ============================================ */
 
 function omada_build_base_path(): string {
     if (OMADA_CONTROLLER_ID !== '') {
@@ -34,8 +36,8 @@ function omada_build_base_path(): string {
 }
 
 /**
- * LOGIN del operador Hotspot:
- * SOLO name + password (como dice TP-Link).
+ * LOGIN del operador Hotspot (primer paso).
+ * SOLO name + password.
  */
 function omada_hotspot_login(): bool {
     @unlink(OMADA_COOKIE_FILE);
@@ -54,6 +56,8 @@ function omada_hotspot_login(): bool {
         OMADA_PORT,
         $basePath
     );
+
+    error_log("🌐 OMADA LOGIN URL: $url");
 
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -79,6 +83,8 @@ function omada_hotspot_login(): bool {
     }
     curl_close($ch);
 
+    error_log("📥 OMADA LOGIN RESPUESTA RAW: $res");
+
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
         error_log("❌ OMADA LOGIN FAILED: " . print_r($obj, true));
@@ -97,8 +103,8 @@ function omada_hotspot_login(): bool {
 }
 
 /**
- * CLIENT ACKNOWLEDGE / AUTH:
- * Aquí es donde realmente se “abre” el acceso al cliente.
+ * AUTH / CLIENT ACKNOWLEDGE
+ * Aquí es donde Omada autoriza al cliente.
  */
 function omada_authorize_client(
     string $clientMac,
@@ -112,13 +118,13 @@ function omada_authorize_client(
     $milliseconds = $minutes * 60 * 1000;
 
     $authInfo = [
-        'clientMac' => $clientMac,
-        'apMac'     => $apMac,
+        'clientMac' => $clientMac,  // tal cual viene del AP
+        'apMac'     => $apMac,      // tal cual viene del AP
         'ssidName'  => $ssidName,
         'radioId'   => $radioId,
         'site'      => $site,
         'time'      => $milliseconds,
-        'authType'  => 4, // External Portal
+        'authType'  => 4,           // External Portal
     ];
 
     $csrfToken = @file_get_contents(OMADA_TOKEN_FILE) ?: '';
@@ -140,6 +146,9 @@ function omada_authorize_client(
         $basePath
     );
 
+    error_log("🌐 OMADA AUTH URL: $url");
+    error_log("➡️ AUTH PAYLOAD: " . json_encode($authInfo));
+
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL            => $url,
@@ -155,48 +164,56 @@ function omada_authorize_client(
 
     $res = curl_exec($ch);
     if ($res === false) {
-        error_log("❌ OMADA AUTHORIZE CURL ERROR: " . curl_error($ch));
+        error_log("❌ OMADA AUTH CURL ERROR: " . curl_error($ch));
         curl_close($ch);
         return false;
     }
     curl_close($ch);
 
+    error_log("📥 OMADA AUTH RESPUESTA RAW: $res");
+
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
-        error_log("❌ OMADA AUTHORIZE FAILED: " . print_r($obj, true));
+        error_log("❌ OMADA AUTH FAILED: " . print_r($obj, true));
         return false;
     }
 
-    error_log("✅ OMADA AUTHORIZE OK PARA MAC: $clientMac");
+    error_log("✅ OMADA AUTH OK PARA MAC: $clientMac");
     return true;
 }
 
-/* ========= LEER PARÁMETROS QUE MANDA OMADA ========= */
+/* ============================================
+ *  JALAR VARIABLES QUE MANDA OMADA
+ *  (SOLO GET/POST, SIN MODIFICAR)
+ * ============================================ */
 
-$mac_raw   = $_GET['clientMac']  ?? $_GET['mac'] ?? '';
-$ip_raw    = $_GET['clientIp']   ?? $_GET['ip']  ?? '';
-$ap_raw    = $_GET['apMac']      ?? $_GET['ap']  ?? '';
-$ssidName  = $_GET['ssidName']   ?? '';
-$radioId   = $_GET['radioId']    ?? '0';
-$site      = $_GET['site']       ?? OMADA_SITE;
-$redirect  = $_GET['redirectUrl'] ?? 'https://www.google.com';
+$clientMac = $_GET['clientMac']   ?? $_POST['clientMac']   ?? ($_GET['mac'] ?? $_POST['mac'] ?? '');
+$clientIp  = $_GET['clientIp']    ?? $_POST['clientIp']    ?? ($_GET['ip']  ?? $_POST['ip']  ?? '');
+$apMac     = $_GET['apMac']       ?? $_POST['apMac']       ?? ($_GET['ap']  ?? $_POST['ap']  ?? '');
+$ssidName  = $_GET['ssidName']    ?? $_POST['ssidName']    ?? '';
+$radioId   = $_GET['radioId']     ?? $_POST['radioId']     ?? '0';
+$site      = $_GET['site']        ?? $_POST['site']        ?? OMADA_DEFAULT_SITE;
+$redirect  = $_GET['redirectUrl'] ?? $_POST['redirectUrl'] ?? 'https://www.google.com';
 
-$clientMac = normalize_mac($mac_raw);
-$apMac     = normalize_mac($ap_raw);
+error_log("🔍 PARAMS - clientMac={$clientMac}, apMac={$apMac}, ip={$clientIp}, ssid={$ssidName}, radioId={$radioId}, site={$site}, redirect={$redirect}");
 
-/* ========= SI NO HAY MAC, NO PODEMOS AUTORIZAR ========= */
+/* ============================================
+ *  VALIDACIÓN BÁSICA
+ * ============================================ */
 
-if ($clientMac === '' || strlen($clientMac) !== 12) {
+if ($clientMac === '') {
     header('Content-Type: text/plain; charset=utf-8');
     echo "No se pudo identificar tu dispositivo. Vuelve a conectarte al Wi-Fi.";
     exit;
 }
 
-/* ========= FLUJO SIMPLE: LOGIN + AUTH + REDIRECT ========= */
+/* ============================================
+ *  FLUJO SIMPLE: LOGIN + AUTH + REDIRECT
+ * ============================================ */
 
 $loginOk = omada_hotspot_login();
 if (!$loginOk) {
-    error_log("⚠️ LOGIN FALLÓ, igual redirigimos sin auth");
+    error_log("⚠️ OMADA LOGIN FALLÓ, redirigimos sin auth");
 } else {
     $authOk = omada_authorize_client(
         $clientMac,
@@ -209,6 +226,6 @@ if (!$loginOk) {
     error_log("RESULTADO AUTH: " . ($authOk ? "OK" : "FAIL"));
 }
 
-// Redirigir a la URL original o a Google
+/* Redirigir siempre a la URL original o a Google */
 header("Location: " . $redirect);
 exit;
