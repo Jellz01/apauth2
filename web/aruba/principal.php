@@ -9,7 +9,7 @@ const OMADA_PORT          = 8043;           // Puerto HTTPS (por defecto 8043)
 /*
  * De tu URL:
  *   https://localhost:8043/2ec6e0fb47d04f54bdfec140a0a15ca1/login?...
- * el controllerId es: 2ec6e0fb47d04f54bdfec140a0a15ca1
+ * el controllerId es:
  */
 const OMADA_CONTROLLER_ID = '2ec6e0fb47d04f54bdfec140a0a15ca1';
 
@@ -25,8 +25,22 @@ define('OMADA_COOKIE_FILE', sys_get_temp_dir() . '/omada_cookie.txt');
 define('OMADA_TOKEN_FILE',  sys_get_temp_dir() . '/omada_token.txt');
 
 /* ============================================
- *  HELPERS OMADA
+ *  HELPERS
  * ============================================ */
+
+/**
+ * Convierte MAC cruda a formato TP-Link:
+ *   aa:bb:cc:dd:ee:ff  -> AA-BB-CC-DD-EE-FF
+ *   aabbccddeeff       -> AA-BB-CC-DD-EE-FF
+ */
+function mac_tplink_format(string $mac_raw): string {
+    $hex = preg_replace('/[^0-9A-Fa-f]/', '', $mac_raw);
+    if (strlen($hex) !== 12) {
+        return '';
+    }
+    $hex = strtoupper($hex);
+    return implode('-', str_split($hex, 2)); // AA-BB-CC-DD-EE-FF
+}
 
 function omada_build_base_path(): string {
     if (OMADA_CONTROLLER_ID !== '') {
@@ -107,19 +121,31 @@ function omada_hotspot_login(): bool {
  * Aquí es donde Omada autoriza al cliente.
  */
 function omada_authorize_client(
-    string $clientMac,
-    string $apMac,
+    string $clientMac_raw,
+    string $apMac_raw,
     string $ssidName,
     string $radioId,
     string $site,
     int $minutes = 120
 ): bool {
 
+    // Formato TP-Link para las MAC
+    $clientMac = mac_tplink_format($clientMac_raw);
+    $apMac     = mac_tplink_format($apMac_raw);
+
+    error_log("🔧 MAC FORMAT - clientMac_raw={$clientMac_raw}, apMac_raw={$apMac_raw}, clientMac={$clientMac}, apMac={$apMac}");
+
+    // Si igual no logramos MAC válida, no mandes basura
+    if ($clientMac === '') {
+        error_log("❌ MAC CLIENTE INVÁLIDA, CANCELANDO AUTH");
+        return false;
+    }
+
     $milliseconds = $minutes * 60 * 1000;
 
     $authInfo = [
-        'clientMac' => $clientMac,  // tal cual viene del AP
-        'apMac'     => $apMac,      // tal cual viene del AP
+        'clientMac' => $clientMac,  // AA-BB-CC-DD-EE-FF
+        'apMac'     => $apMac,      // AA-BB-CC-DD-EE-FF (si existe)
         'ssidName'  => $ssidName,
         'radioId'   => $radioId,
         'site'      => $site,
@@ -187,21 +213,21 @@ function omada_authorize_client(
  *  (SOLO GET/POST, SIN MODIFICAR)
  * ============================================ */
 
-$clientMac = $_GET['clientMac']   ?? $_POST['clientMac']   ?? ($_GET['mac'] ?? $_POST['mac'] ?? '');
-$clientIp  = $_GET['clientIp']    ?? $_POST['clientIp']    ?? ($_GET['ip']  ?? $_POST['ip']  ?? '');
-$apMac     = $_GET['apMac']       ?? $_POST['apMac']       ?? ($_GET['ap']  ?? $_POST['ap']  ?? '');
-$ssidName  = $_GET['ssidName']    ?? $_POST['ssidName']    ?? '';
-$radioId   = $_GET['radioId']     ?? $_POST['radioId']     ?? '0';
-$site      = $_GET['site']        ?? $_POST['site']        ?? OMADA_DEFAULT_SITE;
-$redirect  = $_GET['redirectUrl'] ?? $_POST['redirectUrl'] ?? 'https://www.google.com';
+$clientMac_raw = $_GET['clientMac']   ?? $_POST['clientMac']   ?? ($_GET['mac'] ?? $_POST['mac'] ?? '');
+$clientIp      = $_GET['clientIp']    ?? $_POST['clientIp']    ?? ($_GET['ip']  ?? $_POST['ip']  ?? '');
+$apMac_raw     = $_GET['apMac']       ?? $_POST['apMac']       ?? ($_GET['ap']  ?? $_POST['ap']  ?? '');
+$ssidName      = $_GET['ssidName']    ?? $_POST['ssidName']    ?? '';
+$radioId       = $_GET['radioId']     ?? $_POST['radioId']     ?? '0';
+$site          = $_GET['site']        ?? $_POST['site']        ?? OMADA_DEFAULT_SITE;
+$redirect      = $_GET['redirectUrl'] ?? $_POST['redirectUrl'] ?? 'https://www.google.com';
 
-error_log("🔍 PARAMS - clientMac={$clientMac}, apMac={$apMac}, ip={$clientIp}, ssid={$ssidName}, radioId={$radioId}, site={$site}, redirect={$redirect}");
+error_log("🔍 PARAMS RAW - clientMac={$clientMac_raw}, apMac={$apMac_raw}, ip={$clientIp}, ssid={$ssidName}, radioId={$radioId}, site={$site}, redirect={$redirect}");
 
 /* ============================================
  *  VALIDACIÓN BÁSICA
  * ============================================ */
 
-if ($clientMac === '') {
+if ($clientMac_raw === '') {
     header('Content-Type: text/plain; charset=utf-8');
     echo "No se pudo identificar tu dispositivo. Vuelve a conectarte al Wi-Fi.";
     exit;
@@ -216,12 +242,12 @@ if (!$loginOk) {
     error_log("⚠️ OMADA LOGIN FALLÓ, redirigimos sin auth");
 } else {
     $authOk = omada_authorize_client(
-        $clientMac,
-        $apMac,
+        $clientMac_raw,
+        $apMac_raw,
         $ssidName,
         $radioId,
         $site,
-        121  // minutos de acceso
+        120  // minutos de acceso
     );
     error_log("RESULTADO AUTH: " . ($authOk ? "OK" : "FAIL"));
 }
