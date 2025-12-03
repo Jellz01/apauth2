@@ -221,7 +221,7 @@ if (!$loginOk) {
         $ssidName,
         $radioId,
         $site,
-        120  // minutos de acceso
+        121  // minutos de acceso
     );
     error_log("RESULTADO AUTH: " . ($authOk ? "OK" : "FAIL"));
 }
