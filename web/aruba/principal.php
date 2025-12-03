@@ -1,58 +1,118 @@
 <?php
-/* ============================================
- *  CONFIG BÁSICA OMADA
- * ============================================ */
+session_start();
 
-const OMADA_CONTROLLER    = '192.168.0.3';  // IP o hostname de tu Omada Controller
-const OMADA_PORT          = 8043;           // Puerto HTTPS (por defecto 8043)
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
-/*
- * De tu URL:
- *   https://localhost:8043/2ec6e0fb47d04f54bdfec140a0a15ca1/login?...
- * el controllerId es:
- */
-const OMADA_CONTROLLER_ID = '2ec6e0fb47d04f54bdfec140a0a15ca1';
+/* ============ CONFIG OMADA ============ */
 
-/* Usuario y contraseña del Hotspot Operator */
+// IP o hostname del controller
+const OMADA_CONTROLLER    = '10.0.0.10';
+const OMADA_PORT          = 8043;
+
+// PON AQUÍ EL ID REAL (lo que sale después de /e/ en la URL del Omada)
+const OMADA_CONTROLLER_ID = 'PON_AQUI_TU_CONTROLLER_ID';
+
+// Usuario local del Omada (ya lo creaste)
 const OMADA_OP_USER       = 'portal-operator';
-const OMADA_OP_PASS       = 'Gonet2025@';
+const OMADA_OP_PASS       = 'S3cret!';
 
-/* Nombre del site solo como respaldo si Omada no manda "site" */
-const OMADA_DEFAULT_SITE  = 'jellz_Gonet';
+// Nombre REAL del site (en tu caso)
+const OMADA_SITE          = 'jellz_Gonet';
 
-/* Archivos temporales para cookies y token CSRF */
+// Archivos temporales para cookies y token CSRF
 define('OMADA_COOKIE_FILE', sys_get_temp_dir() . '/omada_cookie.txt');
 define('OMADA_TOKEN_FILE',  sys_get_temp_dir() . '/omada_token.txt');
 
-/* ============================================
- *  HELPERS
- * ============================================ */
+/* ============ CONFIG BD ============ */
 
-/**
- * Convierte MAC cruda a formato TP-Link:
- *   aa:bb:cc:dd:ee:ff  -> AA-BB-CC-DD-EE-FF
- *   aabbccddeeff       -> AA-BB-CC-DD-EE-FF
- */
-function mac_tplink_format(string $mac_raw): string {
-    $hex = preg_replace('/[^0-9A-Fa-f]/', '', $mac_raw);
-    if (strlen($hex) !== 12) {
-        return '';
-    }
-    $hex = strtoupper($hex);
-    return implode('-', str_split($hex, 2)); // AA-BB-CC-DD-EE-FF
+$host = "mysql";
+$user = "radius";
+$pass = "radpass";
+$db   = "radius";
+
+/** ===================== Helpers ===================== */
+
+function normalize_mac($mac_raw) {
+    if (empty($mac_raw)) return '';
+    $hex = preg_replace('/[^0-9A-Fa-f]/', '', (string)$mac_raw);
+    return strtoupper($hex);
 }
 
-function omada_build_base_path(): string {
-    if (OMADA_CONTROLLER_ID !== '') {
-        return '/' . OMADA_CONTROLLER_ID;
+function validarCedulaEC(string $cedula): bool {
+    if (!preg_match('/^\d{10}$/', $cedula)) return false;
+    $prov = (int)substr($cedula, 0, 2);
+    if ($prov < 1 || $prov > 24) return false;
+    $tercer = (int)$cedula[2];
+    if ($tercer >= 6) return false;
+    $coef = [2,1,2,1,2,1,2,1,2];
+    $suma = 0;
+    for ($i = 0; $i < 9; $i++) {
+        $prod = (int)$cedula[$i] * $coef[$i];
+        if ($prod >= 10) $prod -= 9;
+        $suma += $prod;
     }
-    return '';
+    $dv = (10 - ($suma % 10)) % 10;
+    return $dv === (int)$cedula[9];
 }
 
-/**
- * LOGIN del operador Hotspot (primer paso).
- * SOLO name + password.
- */
+function validarTelefonoEC(string $tel): bool {
+    $tel = preg_replace('/\D+/', '', $tel);
+    return preg_match('/^09\d{8}$/', $tel) === 1;
+}
+
+function validarEmailReal(string $email): bool {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
+    $dom = substr(strrchr($email, "@"), 1);
+    if (!$dom) return false;
+    $mxOk = function_exists('checkdnsrr') ? checkdnsrr($dom, 'MX') : false;
+    $aOk  = function_exists('checkdnsrr') ? checkdnsrr($dom, 'A')  : false;
+    return (function_exists('checkdnsrr')) ? ($mxOk || $aOk) : true;
+}
+
+/** ============= Conexión a la Base de Datos ============= */
+
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+try {
+    $conn = new mysqli($host, $user, $pass, $db);
+    $conn->set_charset('utf8mb4');
+    error_log("✅ BD: CONEXIÓN BD EXITOSA");
+} catch (Exception $e) {
+    error_log("❌ BD: ERROR CONEXIÓN BD: " . $e->getMessage());
+    die("<div class='error'>❌ Error de conexión</div>");
+}
+
+/** ============= Parámetros de entrada desde Omada ============= */
+
+$mac_raw   = $_GET['clientMac']  ?? $_GET['mac'] ?? $_POST['mac'] ?? '';
+$ip_raw    = $_GET['clientIp']   ?? $_GET['ip']  ?? $_POST['ip']  ?? '';
+$ap_raw    = $_GET['apMac']      ?? $_GET['ap']  ?? $_POST['ap_mac'] ?? '';
+$ssidName  = $_GET['ssidName']   ?? $_POST['ssidName']   ?? '';
+$radioId   = $_GET['radioId']    ?? $_POST['radioId']    ?? '0';
+$site      = $_GET['site']       ?? $_POST['site']       ?? OMADA_SITE;
+
+$redirect_url_raw = $_GET['redirectUrl'] ?? $_POST['redirect_url'] ?? '';
+
+$mac_norm     = normalize_mac($mac_raw);
+$ap_mac_norm  = normalize_mac($ap_raw);
+$ip           = trim($ip_raw);
+$redirect_url = trim($redirect_url_raw);
+
+error_log("🔍 REQUEST INICIAL - MAC: '$mac_norm', IP: '$ip', AP_MAC: '$ap_mac_norm', SSID: '$ssidName', SITE: '$site', REDIRECT: '$redirect_url'");
+
+$errors = [
+    'mac'      => '',
+    'nombre'   => '',
+    'apellido' => '',
+    'cedula'   => '',
+    'telefono' => '',
+    'email'    => '',
+    'terminos' => ''
+];
+
+/** ============= Helpers Omada API ============= */
+
 function omada_hotspot_login(): bool {
     @unlink(OMADA_COOKIE_FILE);
     @unlink(OMADA_TOKEN_FILE);
@@ -60,18 +120,17 @@ function omada_hotspot_login(): bool {
     $loginInfo = [
         "name"     => OMADA_OP_USER,
         "password" => OMADA_OP_PASS,
+        "site"     => OMADA_SITE,
     ];
 
-    $basePath = omada_build_base_path();
-
     $url = sprintf(
-        "https://%s:%d%s/api/v2/hotspot/login",
+        "https://%s:%d/%s/api/v2/hotspot/login",
         OMADA_CONTROLLER,
         OMADA_PORT,
-        $basePath
+        OMADA_CONTROLLER_ID
     );
 
-    error_log("🌐 OMADA LOGIN URL: $url");
+    error_log("🌐 OMADA LOGIN → URL: $url, USER: " . OMADA_OP_USER . ", SITE: " . OMADA_SITE);
 
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -101,7 +160,7 @@ function omada_hotspot_login(): bool {
 
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
-        error_log("❌ OMADA LOGIN FAILED: " . print_r($obj, true));
+        error_log("❌ OMADA LOGIN FAILED, OBJ: " . print_r($obj, true));
         return false;
     }
 
@@ -110,47 +169,31 @@ function omada_hotspot_login(): bool {
         file_put_contents(OMADA_TOKEN_FILE, $token);
         error_log("✅ OMADA LOGIN OK - TOKEN GUARDADO");
     } else {
-        error_log("⚠️ OMADA LOGIN SIN TOKEN EN RESPUESTA");
+        error_log("⚠️ OMADA LOGIN SIN TOKEN CSRF EN RESPUESTA");
     }
 
     return true;
 }
 
-/**
- * AUTH / CLIENT ACKNOWLEDGE
- * Aquí es donde Omada autoriza al cliente.
- */
 function omada_authorize_client(
-    string $clientMac_raw,
-    string $apMac_raw,
+    string $clientMac,
+    string $apMac,
     string $ssidName,
     string $radioId,
     string $site,
     int $minutes = 120
 ): bool {
 
-    // Formato TP-Link para las MAC
-    $clientMac = mac_tplink_format($clientMac_raw);
-    $apMac     = mac_tplink_format($apMac_raw);
-
-    error_log("🔧 MAC FORMAT - clientMac_raw={$clientMac_raw}, apMac_raw={$apMac_raw}, clientMac={$clientMac}, apMac={$apMac}");
-
-    // Si igual no logramos MAC válida, no mandes basura
-    if ($clientMac === '') {
-        error_log("❌ MAC CLIENTE INVÁLIDA, CANCELANDO AUTH");
-        return false;
-    }
-
     $milliseconds = $minutes * 60 * 1000;
 
     $authInfo = [
-        'clientMac' => $clientMac,  // AA-BB-CC-DD-EE-FF
-        'apMac'     => $apMac,      // AA-BB-CC-DD-EE-FF (si existe)
+        'clientMac' => $clientMac,
+        'apMac'     => $apMac,
         'ssidName'  => $ssidName,
         'radioId'   => $radioId,
         'site'      => $site,
         'time'      => $milliseconds,
-        'authType'  => 4,           // External Portal
+        'authType'  => 4, // External Portal auth
     ];
 
     $csrfToken = @file_get_contents(OMADA_TOKEN_FILE) ?: '';
@@ -163,17 +206,14 @@ function omada_authorize_client(
         $headers[] = "Csrf-Token: " . $csrfToken;
     }
 
-    $basePath = omada_build_base_path();
-
     $url = sprintf(
-        "https://%s:%d%s/api/v2/hotspot/extPortal/auth",
+        "https://%s:%d/%s/api/v2/hotspot/extPortal/auth",
         OMADA_CONTROLLER,
         OMADA_PORT,
-        $basePath
+        OMADA_CONTROLLER_ID
     );
 
-    error_log("🌐 OMADA AUTH URL: $url");
-    error_log("➡️ AUTH PAYLOAD: " . json_encode($authInfo));
+    error_log("🌐 OMADA AUTH → URL: $url, DATA: " . json_encode($authInfo) . ", CSRF: " . substr($csrfToken, 0, 10) . "...");
 
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -190,68 +230,759 @@ function omada_authorize_client(
 
     $res = curl_exec($ch);
     if ($res === false) {
-        error_log("❌ OMADA AUTH CURL ERROR: " . curl_error($ch));
+        error_log("❌ OMADA AUTHORIZE CURL ERROR: " . curl_error($ch));
         curl_close($ch);
         return false;
     }
     curl_close($ch);
 
-    error_log("📥 OMADA AUTH RESPUESTA RAW: $res");
+    error_log("📥 OMADA AUTHORIZE RESPUESTA RAW: $res");
 
     $obj = json_decode($res, true);
     if (!is_array($obj) || ($obj['errorCode'] ?? -1) !== 0) {
-        error_log("❌ OMADA AUTH FAILED: " . print_r($obj, true));
+        error_log("❌ OMADA AUTHORIZE FAILED, OBJ: " . print_r($obj, true));
         return false;
     }
 
-    error_log("✅ OMADA AUTH OK PARA MAC: $clientMac");
+    error_log("✅ OMADA AUTHORIZE OK PARA MAC: $clientMac");
     return true;
 }
 
-/* ============================================
- *  JALAR VARIABLES QUE MANDA OMADA
- *  (SOLO GET/POST, SIN MODIFICAR)
- * ============================================ */
+/** ============= Manejo POST (form y quick connect) ============= */
 
-$clientMac_raw = $_GET['clientMac']   ?? $_POST['clientMac']   ?? ($_GET['mac'] ?? $_POST['mac'] ?? '');
-$clientIp      = $_GET['clientIp']    ?? $_POST['clientIp']    ?? ($_GET['ip']  ?? $_POST['ip']  ?? '');
-$apMac_raw     = $_GET['apMac']       ?? $_POST['apMac']       ?? ($_GET['ap']  ?? $_POST['ap']  ?? '');
-$ssidName      = $_GET['ssidName']    ?? $_POST['ssidName']    ?? '';
-$radioId       = $_GET['radioId']     ?? $_POST['radioId']     ?? '0';
-$site          = $_GET['site']        ?? $_POST['site']        ?? OMADA_DEFAULT_SITE;
-$redirect      = $_GET['redirectUrl'] ?? $_POST['redirectUrl'] ?? 'https://www.google.com';
+$formShouldBeVisible = false; // por defecto oculto
 
-error_log("🔍 PARAMS RAW - clientMac={$clientMac_raw}, apMac={$apMac_raw}, ip={$clientIp}, ssid={$ssidName}, radioId={$radioId}, site={$site}, redirect={$redirect}");
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    error_log("📨 POST DETECTADO, POST DATA: " . print_r($_POST, true));
 
-/* ============================================
- *  VALIDACIÓN BÁSICA
- * ============================================ */
+    // QUICK CONNECT (NAVEGAR sin formulario)
+    if (isset($_POST['quick_connect']) && $_POST['quick_connect'] === '1') {
+        error_log("⚡ QUICK CONNECT: INICIANDO");
 
-if ($clientMac_raw === '') {
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "No se pudo identificar tu dispositivo. Vuelve a conectarte al Wi-Fi.";
-    exit;
+        $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
+        $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
+        $ssidName_post = $_POST['ssidName'] ?? $ssidName;
+        $radioId_post  = $_POST['radioId']  ?? $radioId;
+        $site_post     = $_POST['site']     ?? $site;
+        $redirect_url  = $_POST['redirect_url'] ?? $redirect_url;
+
+        $mac_norm_q    = normalize_mac($mac_post_raw);
+        $ap_mac_norm_q = normalize_mac($ap_post_raw);
+        $ssidName      = $ssidName_post;
+        $radioId       = $radioId_post;
+        $site          = $site_post;
+
+        error_log("⚡ QUICK CONNECT DATA - MAC_NORM: $mac_norm_q, AP_MAC_NORM: $ap_mac_norm_q, SSID: $ssidName, RADIO: $radioId, SITE: $site, REDIRECT: $redirect_url");
+
+        if ($mac_norm_q === '' || strlen($mac_norm_q) !== 12) {
+            $errors['mac'] = 'No se pudo identificar tu dispositivo para conectar.';
+            $formShouldBeVisible = false;
+            error_log("⚠️ QUICK CONNECT: MAC INVÁLIDA, NO REDIRIGIMOS");
+        } else {
+            // Quick connect: solo Omada, sin guardar datos personales
+            $loginOk = omada_hotspot_login();
+            if (!$loginOk) {
+                error_log("⚠️ QUICK CONNECT: OMADA LOGIN FALLÓ, IGUAL REDIRIGIMOS SIN AUTH");
+            } else {
+                $authOk = omada_authorize_client(
+                    $mac_norm_q,
+                    $ap_mac_norm_q,
+                    $ssidName,
+                    $radioId,
+                    $site,
+                    120
+                );
+                error_log("⚡ QUICK CONNECT: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
+            }
+
+            if (!empty($redirect_url)) {
+                error_log("➡️ QUICK CONNECT: REDIRECT A ORIGINAL: $redirect_url");
+                header("Location: " . $redirect_url);
+            } else {
+                error_log("➡️ QUICK CONNECT: REDIRECT A GOOGLE");
+                header("Location: https://www.google.com");
+            }
+            exit;
+        }
+
+    } else {
+        // FORMULARIO COMPLETO (REGISTRO)
+        error_log("📝 REGISTRO FORMULARIO: INICIANDO");
+
+        $nombre   = trim($_POST['nombre']   ?? '');
+        $apellido = trim($_POST['apellido'] ?? '');
+        $cedula   = preg_replace('/\D+/', '', $_POST['cedula'] ?? '');
+        $telefono = preg_replace('/\D+/', '', $_POST['telefono'] ?? '');
+        $email    = trim($_POST['email']    ?? '');
+        $terminos = isset($_POST['terminos']) ? 1 : 0;
+
+        $mac_post_raw  = $_POST['mac']      ?? $mac_raw;
+        $ap_post_raw   = $_POST['ap_mac']   ?? $ap_raw;
+        $ssidName_post = $_POST['ssidName'] ?? $ssidName;
+        $radioId_post  = $_POST['radioId']  ?? $radioId;
+        $site_post     = $_POST['site']     ?? $site;
+        $redirect_url  = $_POST['redirect_url'] ?? $redirect_url;
+
+        $mac_norm     = normalize_mac($mac_post_raw);
+        $ap_mac_norm  = normalize_mac($ap_post_raw);
+        $ssidName     = $ssidName_post;
+        $radioId      = $radioId_post;
+        $site         = $site_post;
+
+        error_log("📝 REGISTRO DATA - MAC_NORM: $mac_norm, AP_MAC_NORM: $ap_mac_norm, NOMBRE: $nombre, APELLIDO: $apellido, MAIL: $email");
+
+        if ($mac_norm === '' || strlen($mac_norm) !== 12) {
+            $errors['mac'] = 'No se pudo identificar correctamente tu dispositivo.';
+        }
+        if ($nombre === '')   $errors['nombre']   = 'Ingresa tu nombre.';
+        if ($apellido === '') $errors['apellido'] = 'Ingresa tu apellido.';
+        if (!validarCedulaEC($cedula)) $errors['cedula'] = 'Cédula inválida.';
+        if (!validarTelefonoEC($telefono)) $errors['telefono'] = 'Teléfono inválido (09XXXXXXXX).';
+        if (!validarEmailReal($email)) $errors['email'] = 'Email inválido.';
+        if (!$terminos) $errors['terminos'] = 'Debes aceptar los términos.';
+
+        $hayErrores = array_filter($errors, function($e) {
+            return $e !== '';
+        });
+
+        $formShouldBeVisible = true;
+
+        if (!$hayErrores) {
+            try {
+                $conn->begin_transaction();
+                error_log("🔄 BD: INICIANDO TRANSACCIÓN REGISTRO");
+
+                $stmt_clients = $conn->prepare("
+                    INSERT INTO clients (nombre, apellido, cedula, telefono, email, mac, ap_mac, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                ");
+                $stmt_clients->bind_param(
+                    "sssssss",
+                    $nombre,
+                    $apellido,
+                    $cedula,
+                    $telefono,
+                    $email,
+                    $mac_norm,
+                    $ap_mac_norm
+                );
+                $stmt_clients->execute();
+                $stmt_clients->close();
+                error_log("✅ BD: CLIENTE INSERTADO - MAC: $mac_norm, AP_MAC: $ap_mac_norm");
+
+                $conn->commit();
+                error_log("✅ BD: TRANSACCIÓN COMPLETADA");
+
+                $loginOk = omada_hotspot_login();
+                if (!$loginOk) {
+                    error_log("⚠️ REGISTRO: OMADA LOGIN FALLÓ, REDIRIGIMOS SIN AUTH");
+                } else {
+                    $authOk = omada_authorize_client(
+                        $mac_norm,
+                        $ap_mac_norm,
+                        $ssidName,
+                        $radioId,
+                        $site,
+                        120
+                    );
+                    error_log("📝 REGISTRO: RESULTADO AUTH = " . ($authOk ? 'OK' : 'FAIL'));
+                }
+
+                if (!empty($redirect_url)) {
+                    error_log("➡️ REGISTRO: REDIRECT A ORIGINAL: $redirect_url");
+                    header("Location: " . $redirect_url);
+                } else {
+                    error_log("➡️ REGISTRO: REDIRECT A GOOGLE");
+                    header("Location: https://www.google.com");
+                }
+                exit;
+
+            } catch (Exception $e) {
+                error_log("❌ BD/REGISTRO: ERROR: " . $e->getMessage());
+                $conn->rollback();
+                header('Content-Type: text/plain; charset=utf-8');
+                die('Error en registro');
+            }
+        } else {
+            error_log("⚠️ REGISTRO: VALIDACIÓN FALLÓ, ERRORES: " . print_r($errors, true));
+            $_POST['nombre']   = $nombre;
+            $_POST['apellido'] = $apellido;
+            $_POST['cedula']   = $cedula;
+            $_POST['telefono'] = $telefono;
+            $_POST['email']    = $email;
+        }
+    }
 }
 
-/* ============================================
- *  FLUJO SIMPLE: LOGIN + AUTH + REDIRECT
- * ============================================ */
+/** ============= HTML (Portal) ============= */
 
-$loginOk = omada_hotspot_login();
-if (!$loginOk) {
-    error_log("⚠️ OMADA LOGIN FALLÓ, redirigimos sin auth");
-} else {
-    $authOk = omada_authorize_client(
-        $clientMac_raw,
-        $apMac_raw,
-        $ssidName,
-        $radioId,
-        $site,
-        120  // minutos de acceso
-    );
-    error_log("RESULTADO AUTH: " . ($authOk ? "OK" : "FAIL"));
-}
+$formPanelClass   = $formShouldBeVisible ? '' : 'hidden';
+$mainCardExtraCls = $formShouldBeVisible ? '' : 'full-left';
 
-/* Redirigir siempre a la URL original o a Google */
-header("Location: " . $redirect);
-exit;
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internet Wi-Fi - GoNet</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', Roboto, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #022c22 0%, #065f46 45%, #10b981 100%);
+            color: #022c22;
+            min-height: 100vh;
+        }
+
+        .page-wrapper {
+            position: relative;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .promo-slider {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+        }
+
+        .promo-slide {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+            background-position: center;
+            background-size: cover;
+            background-repeat: no-repeat;
+            filter: brightness(0.75);
+        }
+
+        .promo-slide.active {
+            opacity: 1;
+        }
+
+        .overlay {
+            position: relative;
+            z-index: 2;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .main-card {
+            width: 100%;
+            max-width: 900px;
+            background: rgba(226, 252, 236, 0.95);
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+            gap: 24px;
+        }
+
+        .main-card.full-left {
+            grid-template-columns: 1fr;
+        }
+
+        @media (max-width: 768px) {
+            .main-card {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .welcome-side {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            color: #022c22;
+        }
+
+        .logo {
+            width: 190px;
+            margin-bottom: 6px;
+        }
+
+        .welcome-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #022c22;
+        }
+
+        .welcome-subtitle {
+            font-size: 0.95rem;
+            color: #064e3b;
+        }
+
+        .badge-ssid {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.12);
+            color: #047857;
+            font-size: 0.8rem;
+            margin-top: 4px;
+        }
+
+        .badge-ssid span {
+            font-weight: 600;
+        }
+
+        .btn-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .btn {
+            border-radius: 999px;
+            padding: 10px 20px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            text-decoration: none;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: #00a870;
+            color: #ecfdf5;
+            box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 18px 40px rgba(16, 185, 129, 0.6);
+            background: #059669;
+        }
+
+        .btn-secondary {
+            background: #dcfce7;
+            color: #065f46;
+            border: 1px solid rgba(34, 197, 94, 0.7);
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-1px);
+            background: #bbf7d0;
+        }
+
+        .contact-block {
+            margin-top: 16px;
+            padding: 12px 12px 10px;
+            border-radius: 16px;
+            background: #ecfdf5;
+            border: 1px solid rgba(22, 163, 74, 0.35);
+        }
+
+        .contact-block h3 {
+            font-size: 0.95rem;
+            color: #064e3b;
+            margin-bottom: 4px;
+        }
+
+        .contact-block p {
+            font-size: 0.85rem;
+            color: #047857;
+        }
+
+        .whatsapp-list {
+            margin-top: 6px;
+            font-size: 0.85rem;
+        }
+
+        .whatsapp-list a {
+            color: #15803d;
+            text-decoration: none;
+        }
+
+        .whatsapp-list a:hover {
+            text-decoration: underline;
+        }
+
+        .more-info {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            color: #065f46;
+        }
+
+        .link-more {
+            border: none;
+            background: none;
+            padding: 0;
+            margin-left: 4px;
+            color: #0284c7;
+            font-size: 0.8rem;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .link-more:hover {
+            color: #0369a1;
+        }
+
+        .form-side {
+            background: #ecfdf5;
+            border-radius: 18px;
+            padding: 18px 16px 14px;
+            border: 1px solid rgba(22, 163, 74, 0.4);
+        }
+
+        .form-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #064e3b;
+            margin-bottom: 6px;
+        }
+
+        .form-subtitle {
+            font-size: 0.8rem;
+            color: #047857;
+            margin-bottom: 10px;
+        }
+
+        .info-display {
+            background: #d1fae5;
+            border-radius: 12px;
+            padding: 8px 10px;
+            font-size: 0.8rem;
+            color: #065f46;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+
+        .error-mac {
+            background: #fee2e2;
+            border-radius: 12px;
+            padding: 10px;
+            font-size: 0.85rem;
+            color: #b91c1c;
+            margin-bottom: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 10px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #064e3b;
+            margin-bottom: 4px;
+        }
+
+        input[type="text"],
+        input[type="tel"],
+        input[type="email"] {
+            width: 100%;
+            padding: 9px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(22, 163, 74, 0.6);
+            font-size: 0.9rem;
+            background: #ffffff;
+            color: #022c22;
+        }
+
+        input::placeholder {
+            color: #6b7280;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #10b981;
+            box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.5);
+        }
+
+        .field-error {
+            color: #b91c1c;
+            font-size: 0.75rem;
+            margin-top: 3px;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #b91c1c;
+            padding: 8px 10px;
+            border-radius: 10px;
+            margin: 6px 0;
+            text-align: center;
+            font-size: 0.8rem;
+        }
+
+        .terms-row {
+            margin-top: 4px;
+            font-size: 0.78rem;
+            color: #064e3b;
+            display: flex;
+            gap: 6px;
+        }
+
+        .terms-row a {
+            color: #0284c7;
+            text-decoration: underline;
+        }
+
+        .terms-row a:hover {
+            color: #0369a1;
+        }
+
+        .submit-row {
+            margin-top: 10px;
+        }
+
+        .submit-row button {
+            width: 100%;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- SLIDER DE 5 PROMOS -->
+    <div class="promo-slider">
+        <div class="promo-slide active" style="background-image: url('promo1.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo2.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo3.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo4.jpg');"></div>
+        <div class="promo-slide" style="background-image: url('promo5.jpg');"></div>
+    </div>
+
+    <div class="overlay">
+        <div class="main-card <?php echo $mainCardExtraCls; ?>" id="main-card">
+            <!-- LADO IZQUIERDO -->
+            <div class="welcome-side">
+                <img src="gonetlogo.png" alt="GoNet" class="logo">
+
+                <div class="badge-ssid">
+                    <span>Wi-Fi GoNet</span>
+                    <span>•</span>
+                    <span><?php echo htmlspecialchars($ssidName ?: 'Red invitado'); ?></span>
+                </div>
+
+                <h1 class="welcome-title">
+                    Bienvenidos al Internet de GoNet
+                </h1>
+                <p class="welcome-subtitle">
+                    Disfruta de una conexión rápida y estable mientras navegas, trabajas o te entretienes.
+                </p>
+
+                <div class="btn-row">
+                    <!-- QUICK CONNECT -->
+                    <button type="button" class="btn btn-primary" onclick="document.getElementById('quick-connect-form').submit();">
+                        NAVEGAR
+                    </button>
+
+                    <a class="btn btn-secondary" href="https://wa.me/593900000000" target="_blank" rel="noopener">
+                        Comunícate con nosotros
+                    </a>
+                </div>
+
+                <div class="contact-block">
+                    <h3>Soporte y ventas GoNet</h3>
+                    <p>Si necesitas ayuda o quieres contratar nuestros servicios, estamos para ayudarte.</p>
+                    <div class="whatsapp-list">
+                        WhatsApp:
+                        <div><a href="https://wa.me/593900000001" target="_blank">+593 9 0000 0001</a></div>
+                        <div><a href="https://wa.me/593900000002" target="_blank">+593 9 0000 0002</a></div>
+                    </div>
+                </div>
+
+                <div class="more-info">
+                    Para más información
+                    <button type="button" class="link-more" onclick="showForm();">
+                        aplasta aquí
+                    </button>.
+                </div>
+
+                <?php if (!empty($errors['mac'])): ?>
+                    <div class="error" style="margin-top:10px;">
+                        <?php echo htmlspecialchars($errors['mac']); ?>
+                    </div>
+                <?php endif; ?>
+
+                <!-- FORMULARIO OCULTO PARA QUICK CONNECT -->
+                <form id="quick-connect-form" method="POST" class="hidden">
+                    <input type="hidden" name="quick_connect" value="1">
+                    <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
+                    <input type="hidden" name="ap_mac"       value="<?php echo htmlspecialchars($ap_raw); ?>">
+                    <input type="hidden" name="ip"           value="<?php echo htmlspecialchars($ip); ?>">
+                    <input type="hidden" name="ssidName"     value="<?php echo htmlspecialchars($ssidName); ?>">
+                    <input type="hidden" name="radioId"      value="<?php echo htmlspecialchars($radioId); ?>">
+                    <input type="hidden" name="site"         value="<?php echo htmlspecialchars($site); ?>">
+                    <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
+                </form>
+            </div>
+
+            <!-- LADO DERECHO: FORM REGISTRO -->
+            <div class="form-side <?php echo $formPanelClass; ?>" id="form-panel">
+                <div class="form-title">Registro rápido</div>
+                <div class="form-subtitle">
+                    Completa tus datos para activar tu acceso a Internet.
+                </div>
+
+                <?php if ($mac_norm === ''): ?>
+                    <div class="error-mac">
+                        ❌ No se detectó correctamente tu dispositivo.<br>
+                        <small>Por favor, desconéctate y vuelve a conectarte a la red Wi-Fi.</small>
+                    </div>
+                <?php else: ?>
+                    <div class="info-display">
+                        Tu dispositivo está listo para ser registrado. Solo necesitamos algunos datos.
+                    </div>
+
+                    <?php if (!empty($errors['mac']) && $formShouldBeVisible): ?>
+                        <div class="error"><?php echo htmlspecialchars($errors['mac']); ?></div>
+                    <?php endif; ?>
+
+                    <form id="form-wifi-gonet" method="POST" autocomplete="on" novalidate>
+                        <div class="form-group">
+                            <label>Nombre *</label>
+                            <input type="text" name="nombre" required
+                                   value="<?php echo htmlspecialchars($_POST['nombre'] ?? ''); ?>"
+                                   placeholder="Ingresa tu nombre">
+                            <?php if (!empty($errors['nombre'])): ?>
+                                <div class="field-error"><?php echo $errors['nombre']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Apellido *</label>
+                            <input type="text" name="apellido" required
+                                   value="<?php echo htmlspecialchars($_POST['apellido'] ?? ''); ?>"
+                                   placeholder="Ingresa tu apellido">
+                            <?php if (!empty($errors['apellido'])): ?>
+                                <div class="field-error"><?php echo $errors['apellido']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Cédula (10 dígitos) *</label>
+                            <input type="text" name="cedula" inputmode="numeric" required
+                                   value="<?php echo htmlspecialchars($_POST['cedula'] ?? ''); ?>"
+                                   placeholder="Ej: 0102030405">
+                            <?php if (!empty($errors['cedula'])): ?>
+                                <div class="field-error"><?php echo $errors['cedula']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Teléfono (09XXXXXXXX) *</label>
+                            <input type="tel" name="telefono" inputmode="tel" required
+                                   value="<?php echo htmlspecialchars($_POST['telefono'] ?? ''); ?>"
+                                   placeholder="Ej: 09XXXXXXXX">
+                            <?php if (!empty($errors['telefono'])): ?>
+                                <div class="field-error"><?php echo $errors['telefono']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Email *</label>
+                            <input type="email" name="email" required
+                                   value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>"
+                                   placeholder="tucorreo@ejemplo.com">
+                            <?php if (!empty($errors['email'])): ?>
+                                <div class="field-error"><?php echo $errors['email']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="terms-row">
+                                <input type="checkbox" name="terminos" required
+                                    <?php echo isset($_POST['terminos']) ? 'checked' : ''; ?>>
+                                <span>
+                                    Acepto los
+                                    <a href="https://gonet.ec/terminos" target="_blank" rel="noopener">
+                                        términos y condiciones
+                                    </a>.
+                                </span>
+                            </label>
+                            <?php if (!empty($errors['terminos'])): ?>
+                                <div class="field-error"><?php echo $errors['terminos']; ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <input type="hidden" name="mac"          value="<?php echo htmlspecialchars($mac_raw); ?>">
+                        <input type="hidden" name="ap_mac"       value="<?php echo htmlspecialchars($ap_raw); ?>">
+                        <input type="hidden" name="ip"           value="<?php echo htmlspecialchars($ip); ?>">
+                        <input type="hidden" name="ssidName"     value="<?php echo htmlspecialchars($ssidName); ?>">
+                        <input type="hidden" name="radioId"      value="<?php echo htmlspecialchars($radioId); ?>">
+                        <input type="hidden" name="site"         value="<?php echo htmlspecialchars($site); ?>">
+                        <input type="hidden" name="redirect_url" value="<?php echo htmlspecialchars($redirect_url); ?>">
+
+                        <div class="submit-row">
+                            <button type="submit" class="btn btn-primary">
+                                NAVEGAR
+                            </button>
+                        </div>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Slider simple de 5 imágenes (sin ES6 para máxima compatibilidad)
+    (function() {
+        var slides = document.getElementsByClassName('promo-slide');
+        if (!slides.length) return;
+        var current = 0;
+
+        function showSlide(index) {
+            for (var i = 0; i < slides.length; i++) {
+                if (i === index) {
+                    slides[i].classList.add('active');
+                } else {
+                    slides[i].classList.remove('active');
+                }
+            }
+        }
+
+        setInterval(function() {
+            current = (current + 1) % slides.length;
+            showSlide(current);
+        }, 5000);
+    })();
+
+    // Mostrar el formulario cuando se hace click en "aplasta aquí"
+    function showForm() {
+        var formPanel = document.getElementById('form-panel');
+        var mainCard  = document.getElementById('main-card');
+        if (formPanel && mainCard) {
+            formPanel.classList.remove('hidden');
+            mainCard.classList.remove('full-left');
+            try {
+                formPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (e) {
+                // por si el navegador no soporta scrollIntoView con opciones
+                formPanel.scrollIntoView();
+            }
+        }
+    }
+</script>
+</body>
+</html>
